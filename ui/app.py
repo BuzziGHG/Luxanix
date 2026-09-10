@@ -10,10 +10,17 @@ Features:
 - Multi-Generation GPU support (RTX 20, 30, 40, and 50-Series)
 """
 
+import sys
 import os
 import json
 import math
 import time
+
+# Ensure project root is in Python module search path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import cv2
 import numpy as np
 import torch
