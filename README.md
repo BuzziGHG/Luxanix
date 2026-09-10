@@ -26,12 +26,20 @@ Normale Videobearbeitungsprogramme wie CapCut können zwar Sättigung und Kontra
 
 ---
 
-## 🖥️ Systemvoraussetzungen
+## 🖥️ Unterstützte Grafikkarten & Generationen
 
-- **Grafikkarte:** NVIDIA GeForce RTX 3080 Ti (oder RTX 30/40-Serie mit mind. 8 GB VRAM)
+SimRTX Studio erkennt deine NVIDIA Grafikkarte automatisch und wählt das ideale Performance- und Speicherprofil:
+
+| Generation | Architektur | Unterstützte Modelle | Optimierungs-Features |
+| :--- | :--- | :--- | :--- |
+| **Ältere RTX-Karten** | **Turing (RTX 20)** | RTX 2060 (6GB/12GB), 2070, 2080, 2080 Ti | **Low-VRAM Profil:** Automatische adaptive Skalierung gegen VRAM-Überlauf, periodischer CUDA Cache-Flush, Turing NVENC (`preset p4`). |
+| **Aktuelle Generation** | **Ampere (RTX 30)** | RTX 3060, 3070, 3080, **RTX 3080 Ti**, 3090 | **Ultra / Balanced Profil:** Volle Ausnutzung von 12 GB+ VRAM, FP16 Tensor Cores, bis zu 4K-Rendering, NVENC (`preset p6/p7`). |
+| **Neuere Generationen** | **Ada Lovelace (RTX 40)** | RTX 4060, 4070, 4080, 4090 | **Maximum Quality Profil:** 4. Gen Tensor Cores, AV1/Dual-NVENC, ultra-dichte Raymarching-Samples. |
+| **Zukünftige Generationen** | **Blackwell (RTX 50)** | RTX 50-Serie (via Update) | Bereits vorbereitet für Compute 9.0+, SM 10.0 und nächste Tensor-Core Generationen. |
+
 - **Betriebssystem:** Windows 10 / 11 (64-bit)
-- **Treiber:** NVIDIA Game Ready / Studio Driver mit CUDA-Unterstützung
-- **Speicher:** Mind. 16 GB RAM empfohlen
+- **Treiber:** NVIDIA Game Ready / Studio Driver mit CUDA-Unterstützung (Driver 530+)
+- **System-RAM:** Mind. 16 GB empfohlen
 
 ---
 

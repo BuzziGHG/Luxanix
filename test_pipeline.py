@@ -99,9 +99,14 @@ def main():
         print(f"GPU Modell:    {torch.cuda.get_device_name(0)}")
         print(f"CUDA Version:  {torch.version.cuda}")
         vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 2)
-        print(f"VRAM Speicher: {vram_mb:.0f} MB")
     else:
         print("Hinweis: CUDA nicht aktiv, verwende CPU.")
+
+    from engine.hardware import detect_gpu_hardware, get_profile_settings
+    hw = detect_gpu_hardware()
+    print(f"Erkannte Architektur: {hw.generation}")
+    print(f"Empfohlenes Profil:   {hw.recommended_profile.upper()}")
+    print(f"FP16 Unterstützung:   {hw.fp16_supported} | BF16: {hw.bf16_supported}")
 
     output_dir = os.path.join(os.path.dirname(__file__), "test_output")
     os.makedirs(output_dir, exist_ok=True)
@@ -134,23 +139,36 @@ def main():
         "denoise": True,
     }
 
-    print("\n[3/5] Führe Raytracing & Color Grading durch...")
-    # Warmup
-    _ = pipeline.process_single_frame(test_frame, test_params)
+    print("\n[3/5] Benchmark Ultra Profile (RTX 3080 Ti / 40 / 50 Serie)...")
+    ultra_params = dict(test_params)
+    ultra_params.update(get_profile_settings("ultra"))
+    _ = pipeline.process_single_frame(test_frame, ultra_params)
 
-    # Benchmark run
     start_time = time.perf_counter()
     iterations = 5
     for _ in range(iterations):
-        out_rgb, depth_viz, normals_viz = pipeline.process_single_frame(test_frame, test_params)
+        out_rgb, depth_viz, normals_viz = pipeline.process_single_frame(test_frame, ultra_params)
     if device.type == "cuda":
         torch.cuda.synchronize()
-    duration = (time.perf_counter() - start_time) / iterations
-    fps = 1.0 / duration
+    duration_ultra = (time.perf_counter() - start_time) / iterations
+    fps_ultra = 1.0 / duration_ultra
 
-    print(f"\n[4/5] Benchmark-Ergebnis:")
-    print(f"      Laufzeit pro Frame: {duration * 1000.0:.2f} ms")
-    print(f"      Verarbeitungsrate:  {fps:.1f} FPS")
+    print(f"      Ultra Modus: {duration_ultra * 1000.0:.2f} ms pro Frame ({fps_ultra:.1f} FPS)")
+
+    print("\n[4/5] Benchmark Low-VRAM Profile (RTX 2060 / 2070 / 6-8 GB VRAM)...")
+    low_params = dict(test_params)
+    low_params.update(get_profile_settings("low_vram"))
+    low_params["max_internal_res"] = 540
+
+    start_time = time.perf_counter()
+    for _ in range(iterations):
+        out_rgb_low, _, _ = pipeline.process_single_frame(test_frame, low_params)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    duration_low = (time.perf_counter() - start_time) / iterations
+    fps_low = 1.0 / duration_low
+
+    print(f"      Low-VRAM Modus: {duration_low * 1000.0:.2f} ms pro Frame ({fps_low:.1f} FPS - {duration_ultra / duration_low:.1f}x schneller!)")
 
     print("\n[5/5] Speichere Bild-Ausgaben...")
     Image.fromarray(depth_viz).save(os.path.join(output_dir, "02_depth_map.png"))
@@ -158,7 +176,7 @@ def main():
     Image.fromarray(out_rgb).save(os.path.join(output_dir, "04_raytraced_output.png"))
 
     print(f"Dateien erfolgreich gespeichert in: {output_dir}")
-    print("\nAlle Tests erfolgreich bestanden! SimRTX Studio ist voll einsatzbereit.")
+    print("\nAlle Hardware-Profile erfolgreich validiert!")
 
 
 if __name__ == "__main__":

@@ -54,8 +54,9 @@ class ScreenSpaceRaytracer:
         # 2. Compute Ray Traced Ambient Occlusion (RTAO)
         rtao_intensity = params.get("rtao_intensity", 0.75)
         rtao_radius = params.get("rtao_radius", 1.2)
+        rtao_samples = int(params.get("rtao_samples", 8))
         if rtao_intensity > 0.0:
-            ao_factor = self._compute_rtao(pos, normals, depth, radius=rtao_radius)
+            ao_factor = self._compute_rtao(pos, normals, depth, radius=rtao_radius, num_samples=rtao_samples)
             # Modulate intensity
             ao = 1.0 - (1.0 - ao_factor) * rtao_intensity
         else:
@@ -77,9 +78,10 @@ class ScreenSpaceRaytracer:
         ssr_intensity = params.get("ssr_intensity", 0.5)
         roughness = params.get("roughness", 0.25)
         wet_track_mode = params.get("wet_track_mode", False)
+        ssr_steps = int(params.get("ssr_steps", 16))
         if ssr_intensity > 0.0:
             ssr_buffer = self._compute_ssr(
-                color, pos, normals, depth, roughness=roughness, wet_track_mode=wet_track_mode
+                color, pos, normals, depth, roughness=roughness, wet_track_mode=wet_track_mode, max_steps=ssr_steps
             )
             ssr_buffer = ssr_buffer * ssr_intensity
         else:

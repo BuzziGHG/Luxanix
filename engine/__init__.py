@@ -9,6 +9,7 @@ from .raytracer import ScreenSpaceRaytracer
 from .denoiser import BilateralDenoiser
 from .postprocess import ColorGrader
 from .video_pipeline import VideoPipeline
+from .hardware import detect_gpu_hardware, get_profile_settings, GPUHardwareProfile
 
 __all__ = [
     "DepthEstimator",
@@ -18,4 +19,7 @@ __all__ = [
     "BilateralDenoiser",
     "ColorGrader",
     "VideoPipeline",
+    "detect_gpu_hardware",
+    "get_profile_settings",
+    "GPUHardwareProfile",
 ]

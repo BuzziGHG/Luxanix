@@ -1,6 +1,7 @@
 """
 SimRTX Studio - Modern User Interface
 Dark RTX / Simracing Themed Studio for Ray Tracing and Color Grading Video Reworks.
+Supports Multi-Generation NVIDIA GPUs (RTX 20-Series, 30-Series, 40-Series, and 50-Series).
 """
 
 import os
@@ -10,10 +11,11 @@ import numpy as np
 import torch
 import gradio as gr
 from PIL import Image
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 
 from engine.depth_estimator import DepthEstimator
 from engine.video_pipeline import VideoPipeline
+from engine.hardware import detect_gpu_hardware, get_profile_settings, HARDWARE_PROFILES
 
 # Load Presets
 PRESETS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets.json")
@@ -23,7 +25,8 @@ if os.path.exists(PRESETS_PATH):
 else:
     PRESETS = {}
 
-# Global Engine Pipeline Singleton
+# Global GPU Profile & Engine Pipeline Singleton
+GPU_INFO = detect_gpu_hardware()
 PIPELINE = None
 
 
@@ -34,12 +37,15 @@ def get_pipeline():
     return PIPELINE
 
 
-def get_gpu_info():
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-        return f"🟢 GPU Aktiv: {gpu_name} ({vram_gb:.1f} GB VRAM) | CUDA FP16 Beschleunigung Bereit"
-    return "⚠️ Warnung: Keine CUDA GPU gefunden. CPU-Modus aktiv."
+def get_gpu_badge_html():
+    if GPU_INFO.vram_gb > 0:
+        return (
+            f"🟢 <b>GPU:</b> {GPU_INFO.device_name} | "
+            f"<b>Architektur:</b> {GPU_INFO.generation} | "
+            f"<b>VRAM:</b> {GPU_INFO.vram_gb:.1f} GB | "
+            f"<b>Auto-Profil:</b> {GPU_INFO.recommended_profile.upper()}"
+        )
+    return "⚠️ Warnung: Keine CUDA GPU gefunden. CPU-Software-Modus aktiv."
 
 
 def extract_frame_from_video(video_path: str, timestamp_sec: float) -> np.ndarray:
@@ -94,10 +100,32 @@ def apply_preset_to_sliders(preset_name: str):
     ]
 
 
+def parse_hardware_profile(selection_str: str) -> str:
+    """Extracts profile key ('low_vram', 'balanced', 'ultra') from UI dropdown."""
+    if "20-Serie" in selection_str or "6-8 GB" in selection_str:
+        return "low_vram"
+    elif "30-Serie" in selection_str or "Ausgewogen" in selection_str:
+        return "balanced"
+    elif "40" in selection_str or "50" in selection_str or "Maximum" in selection_str:
+        return "ultra"
+    return GPU_INFO.recommended_profile
+
+
+def on_hardware_profile_change(selection_str: str):
+    """Adjusts raymarching sample defaults when user switches GPU profile."""
+    prof_key = parse_hardware_profile(selection_str)
+    settings = get_profile_settings(prof_key)
+    return [
+        settings.get("rtgi_steps", 10),
+        settings.get("rtao_radius", 1.2),
+    ]
+
+
 def process_preview_frame(
     input_image,
     video_file,
     video_timestamp,
+    hardware_profile_choice,
     rtgi_intensity,
     rtgi_range,
     rtgi_steps,
@@ -124,14 +152,16 @@ def process_preview_frame(
     elif video_file is not None:
         frame_rgb = extract_frame_from_video(video_file, video_timestamp)
     else:
-        # Create a test gaming synthetic frame if nothing provided
+        # Synthetic test frame if nothing provided
         frame_rgb = np.zeros((720, 1280, 3), dtype=np.uint8)
-        frame_rgb[360:, :] = [40, 42, 45]  # Road
-        frame_rgb[:360, :] = [80, 140, 210]  # Sky
-        cv2.rectangle(frame_rgb, (440, 280), (840, 520), (220, 20, 30), -1)  # Car
-        cv2.rectangle(frame_rgb, (400, 500), (880, 530), (10, 10, 10), -1)  # Shadow
+        frame_rgb[360:, :] = [40, 42, 45]
+        frame_rgb[:360, :] = [80, 140, 210]
+        cv2.rectangle(frame_rgb, (440, 280), (840, 520), (220, 20, 30), -1)
+        cv2.rectangle(frame_rgb, (400, 500), (880, 530), (10, 10, 10), -1)
 
-    # Build params dict
+    prof_key = parse_hardware_profile(hardware_profile_choice)
+    prof_settings = get_profile_settings(prof_key)
+
     params = {
         "rtgi_intensity": float(rtgi_intensity),
         "rtgi_range": float(rtgi_range),
@@ -152,17 +182,21 @@ def process_preview_frame(
         "vignette": float(vignette),
         "denoise": bool(denoise),
     }
+    # Merge hardware optimizations (rtao_samples, ssr_steps, max_internal_res)
+    for k, v in prof_settings.items():
+        if k not in params:
+            params[k] = v
 
     pipeline = get_pipeline()
     out_rgb, depth_viz, normals_viz = pipeline.process_single_frame(frame_rgb, params)
 
-    # Return slider tuple: (original_frame, raytraced_frame)
     slider_tuple = (Image.fromarray(frame_rgb), Image.fromarray(out_rgb))
     return slider_tuple, Image.fromarray(depth_viz), Image.fromarray(normals_viz)
 
 
 def render_full_video(
     video_file,
+    hardware_profile_choice,
     rtgi_intensity,
     rtgi_range,
     rtgi_steps,
@@ -187,6 +221,9 @@ def render_full_video(
     if video_file is None:
         raise gr.Error("Bitte lade zuerst ein Video hoch!")
 
+    prof_key = parse_hardware_profile(hardware_profile_choice)
+    prof_settings = get_profile_settings(prof_key)
+
     params = {
         "rtgi_intensity": float(rtgi_intensity),
         "rtgi_range": float(rtgi_range),
@@ -207,6 +244,9 @@ def render_full_video(
         "vignette": float(vignette),
         "denoise": bool(denoise),
     }
+    for k, v in prof_settings.items():
+        if k not in params:
+            params[k] = v
 
     output_dir = os.path.join(os.path.expanduser("~"), "Videos", "SimRTX_Renders")
     os.makedirs(output_dir, exist_ok=True)
@@ -230,7 +270,6 @@ def render_full_video(
     return rendered_path, f"✅ Video erfolgreich fertig gerendert: {rendered_path}"
 
 
-# Custom Theme & Styling
 custom_css = """
 body, .gradio-container {
     background-color: #0d0f12 !important;
@@ -278,7 +317,7 @@ def build_app():
                 <p style="color: #8c9ba5; font-size: 1.05rem; margin-top: 0;">
                     Photorealistisches Screen-Space Raytracing (RTGI, SSR, RTAO) & Color-Grading für Simracing- und Gaming-Videos.
                 </p>
-                <div class="gpu-badge">{get_gpu_info()}</div>
+                <div class="gpu-badge">{get_gpu_badge_html()}</div>
             </div>
             """
         )
@@ -298,17 +337,31 @@ def build_app():
                         sources=["upload", "clipboard"]
                     )
 
+                with gr.Tab("⚙️ GPU-Hardware & VRAM"):
+                    hw_choices = [
+                        f"Automatisch ({GPU_INFO.generation} - {GPU_INFO.recommended_profile.upper()})",
+                        "RTX 20-Serie / 6-8 GB VRAM (Performance & Memory-Saver)",
+                        "RTX 30-Serie / 8-12 GB VRAM (Ausgewogen)",
+                        "RTX 40/50-Serie / 12GB+ (Maximum Quality)"
+                    ]
+                    hardware_profile_choice = gr.Dropdown(
+                        choices=hw_choices,
+                        value=hw_choices[0],
+                        label="Grafikkarten-Profil (VRAM & Performance Optimierung)",
+                        info="Wähle deine GPU-Klasse, um Speicherverbrauch und Render-Geschwindigkeit optimal abzustimmen."
+                    )
+
                 with gr.Tab("🎨 Presets & Profile"):
                     preset_dropdown = gr.Dropdown(
                         choices=list(PRESETS.keys()),
                         value="Simracing: Wet Track & Reflections" if "Simracing: Wet Track & Reflections" in PRESETS else None,
-                        label="Preset auswählen"
+                        label="Shader-Preset auswählen"
                     )
 
                 with gr.Accordion("✨ Raytracing-Shader Einstellungen (RTX Core)", open=True):
                     rtgi_intensity = gr.Slider(0.0, 2.0, value=0.65, step=0.05, label="RTGI: Indirektes Licht (Bounce Light)")
                     rtgi_range = gr.Slider(1.0, 10.0, value=4.0, step=0.5, label="RTGI: Licht-Reichweite (Radius)")
-                    rtgi_steps = gr.Slider(4, 20, value=10, step=1, label="RTGI: Raymarching Samples / Qualität")
+                    rtgi_steps = gr.Slider(4, 24, value=10, step=1, label="RTGI: Raymarching Samples / Qualität")
 
                     gr.HTML("<hr style='border-color: #2a2e35; margin: 10px 0;'>")
                     ssr_intensity = gr.Slider(0.0, 2.0, value=0.5, step=0.05, label="SSR: Reflexionen (Asphalt / Lack / Wasser)")
@@ -355,6 +408,27 @@ def build_app():
                     render_status = gr.Textbox(label="Status & Speicherort", interactive=False)
                     rendered_video_output = gr.Video(label="Fertiges RTX-Video")
 
+                with gr.Tab("ℹ️ Grafikkarten-Kompatibilität & Generationen"):
+                    gr.Markdown(
+                        """
+                        ### 🎮 Unterstützte Grafikkarten-Generationen
+                        
+                        SimRTX Studio passt sich automatisch an deine NVIDIA Grafikkarte an:
+                        
+                        - **Ältere Generationen (Turing - RTX 20-Serie):**
+                          - *Karten:* RTX 2060 (6GB / 12GB), RTX 2070, RTX 2080, RTX 2080 Ti
+                          - *Optimierungen:* Automatisches Memory-Management, adaptive interne Skalierung gegen VRAM-Überlauf, effizientes FP16-Raymarching, Turing-NVENC (`preset p4`).
+                        
+                        - **Aktuelle Generation (Ampere - RTX 30-Serie):**
+                          - *Karten:* RTX 3060, 3070, 3080, **3080 Ti (deine Karte)**, RTX 3090
+                          - *Optimierungen:* Schnelle 2. Gen RT Cores + 3. Gen Tensor Cores, Ampere NVENC, bis zu 4K Auflösung.
+                        
+                        - **Neue & zukünftige Generationen (Ada Lovelace / Blackwell):**
+                          - *Karten:* RTX 4060, 4070, 4080, 4090 sowie kommende RTX 50-Serie
+                          - *Optimierungen:* AV1 / Dual-NVENC Enkodierung, maximale Raymarching-Sampledichte (Ultra Profile).
+                        """
+                    )
+
         all_sliders = [
             rtgi_intensity, rtgi_range, rtgi_steps,
             ssr_intensity, roughness, wet_track_mode,
@@ -363,20 +437,28 @@ def build_app():
             bloom_intensity, bloom_threshold, use_aces, vignette, denoise
         ]
 
+        # Preset change handler
         preset_dropdown.change(
             fn=apply_preset_to_sliders,
             inputs=[preset_dropdown],
             outputs=all_sliders
         )
 
-        preview_inputs = [image_input, video_input, video_timestamp] + all_sliders
+        # Hardware Profile change handler
+        hardware_profile_choice.change(
+            fn=on_hardware_profile_change,
+            inputs=[hardware_profile_choice],
+            outputs=[rtgi_steps, rtao_radius]
+        )
+
+        preview_inputs = [image_input, video_input, video_timestamp, hardware_profile_choice] + all_sliders
         btn_preview.click(
             fn=process_preview_frame,
             inputs=preview_inputs,
             outputs=[preview_slider, depth_view, normals_view]
         )
 
-        render_inputs = [video_input] + all_sliders
+        render_inputs = [video_input, hardware_profile_choice] + all_sliders
         btn_render_video.click(
             fn=render_full_video,
             inputs=render_inputs,

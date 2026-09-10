@@ -53,20 +53,26 @@ class VideoPipeline:
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Processes a single RGB frame for live UI preview.
-
-        Returns:
-            Tuple of:
-                - output_rgb (H, W, 3) in uint8 [0, 255]
-                - depth_viz (H, W, 3) in uint8 [0, 255]
-                - normals_viz (H, W, 3) in uint8 [0, 255]
+        Supports adaptive internal resolution scaling for low VRAM cards (e.g. RTX 2060/2070).
         """
-        h, w = frame_rgb.shape[:2]
+        orig_h, orig_w = frame_rgb.shape[:2]
+        max_internal_res = params.get("max_internal_res", None)
+
+        # Adaptive downscaling for low-memory GPUs if necessary
+        needs_resize = (max_internal_res is not None) and (orig_h > max_internal_res)
+        if needs_resize:
+            scale = max_internal_res / orig_h
+            proc_w = int(orig_w * scale)
+            proc_h = int(max_internal_res)
+            frame_proc = cv2.resize(frame_rgb, (proc_w, proc_h), interpolation=cv2.INTER_AREA)
+        else:
+            frame_proc = frame_rgb
 
         # 1. Depth Estimation
-        depth = self.depth_estimator.estimate_depth(frame_rgb).to(device=self.device, dtype=self.dtype)
+        depth = self.depth_estimator.estimate_depth(frame_proc).to(device=self.device, dtype=self.dtype)
 
         # 2. Prepare color tensor
-        color_np = frame_rgb.astype(np.float32) / 255.0
+        color_np = frame_proc.astype(np.float32) / 255.0
         color_tensor = torch.from_numpy(color_np).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.dtype)
 
         # 3. Ray Tracing
@@ -90,14 +96,22 @@ class VideoPipeline:
         # Convert back to uint8 numpy
         out_np = (output_tensor.squeeze(0).permute(1, 2, 0).cpu().float().numpy() * 255.0).clip(0, 255).astype(np.uint8)
 
+        # Upscale back to original resolution if scaled
+        if needs_resize:
+            out_np = cv2.resize(out_np, (orig_w, orig_h), interpolation=cv2.INTER_LANCZOS4)
+
         # Visualizations for Depth & Normals
         depth_np = depth.squeeze().cpu().float().numpy()
         depth_viz = (depth_np * 255.0).clip(0, 255).astype(np.uint8)
         depth_viz = cv2.applyColorMap(depth_viz, cv2.COLORMAP_INFERNO)
         depth_viz = cv2.cvtColor(depth_viz, cv2.COLOR_BGR2RGB)
+        if needs_resize:
+            depth_viz = cv2.resize(depth_viz, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
         normals_np = rt_results["normals"].squeeze(0).permute(1, 2, 0).cpu().float().numpy()
         normals_viz = ((normals_np * 0.5 + 0.5) * 255.0).clip(0, 255).astype(np.uint8)
+        if needs_resize:
+            normals_viz = cv2.resize(normals_viz, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
         return out_np, depth_viz, normals_viz
 
@@ -144,6 +158,8 @@ class VideoPipeline:
         start_time = time.time()
         frame_idx = 0
 
+        empty_cache_freq = int(params.get("empty_cache_freq", 30))
+
         try:
             while True:
                 ret, frame_bgr = cap.read()
@@ -159,6 +175,10 @@ class VideoPipeline:
                 writer.write(out_bgr)
                 frame_idx += 1
 
+                # Periodic CUDA cache cleanup to avoid memory fragmentation on low-VRAM GPUs (e.g. RTX 2060)
+                if frame_idx % empty_cache_freq == 0 and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
                 elapsed = time.time() - start_time
                 current_fps = frame_idx / (elapsed + 1e-5)
                 eta = (total_frames - frame_idx) / (current_fps + 1e-5) if total_frames > 0 else 0.0
@@ -171,7 +191,8 @@ class VideoPipeline:
             writer.release()
 
         # Step 3: Combine with audio & encode via NVENC/FFmpeg
-        self._finalize_video(temp_video_no_audio, temp_audio if has_audio else None, output_path, fps)
+        nvenc_preset = params.get("nvenc_preset", "p7")
+        self._finalize_video(temp_video_no_audio, temp_audio if has_audio else None, output_path, fps, nvenc_preset=nvenc_preset)
 
         # Cleanup temp files
         if os.path.exists(temp_video_no_audio):
@@ -200,18 +221,18 @@ class VideoPipeline:
         except Exception:
             return False
 
-    def _finalize_video(self, video_path: str, audio_path: Optional[str], output_path: str, fps: float):
+    def _finalize_video(self, video_path: str, audio_path: Optional[str], output_path: str, fps: float, nvenc_preset: str = "p7"):
         """
         Combines processed video with audio and encodes via NVIDIA NVENC if available.
         """
-        # Try NVENC first (RTX 3080 Ti hardware encoder)
+        # Try NVENC first (RTX hardware encoder)
         cmd_nvenc = ["ffmpeg", "-y", "-i", video_path]
         if audio_path and os.path.exists(audio_path):
             cmd_nvenc.extend(["-i", audio_path, "-c:a", "aac"])
 
         cmd_nvenc.extend([
             "-c:v", "h264_nvenc",
-            "-preset", "p7",  # Highest quality NVENC preset
+            "-preset", nvenc_preset,
             "-rc", "vbr",
             "-cq", "19",
             "-pix_fmt", "yuv420p",
