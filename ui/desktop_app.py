@@ -55,8 +55,9 @@ class LuxanixDesktopApp(ctk.CTk):
         self.gpu_info = detect_gpu_hardware()
         self.current_profile_key = getattr(self.gpu_info, "recommended_profile", "ultra")
 
-        # Video & Timeline State
+        # Video, Photo & Timeline State
         self.video_path = None
+        self.media_type = "video"  # "video" or "image"
         self.video_info = {}
         self.video_cap = None
         self.total_duration_sec = 0.0
@@ -304,7 +305,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         btn_import = ctk.CTkButton(
             box_import,
-            text="➕ Video importieren",
+            text="➕ Video oder Foto importieren",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#1f2835",
             hover_color="#2a3749",
@@ -316,7 +317,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_media_status = ctk.CTkLabel(
             box_import,
-            text="Beliebiges Gameplay- oder Simracing-Video\n(MP4, MKV, AVI, MOV bis 8K)",
+            text="Videos (MP4, MKV, AVI, MOV) oder Fotos\n(PNG, JPG, WEBP, BMP bis 8K)",
             font=ctk.CTkFont(size=10),
             text_color="#64748b",
             justify="center"
@@ -328,7 +329,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_clip_title = ctk.CTkLabel(
             self.card_clip_info,
-            text="📄 Kein Video geladen",
+            text="📄 Kein Medium geladen",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color="#e2e8f0",
             anchor="w"
@@ -337,7 +338,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_clip_details = ctk.CTkLabel(
             self.card_clip_info,
-            text="Importiere ein Video, um den Player & Schnitt zu starten.",
+            text="Importiere ein Video oder Foto für RTX Remaster & Schnitt.",
             font=ctk.CTkFont(size=10),
             text_color="#94a3b8",
             justify="left",
@@ -1137,7 +1138,12 @@ class LuxanixDesktopApp(ctk.CTk):
     # =========================================================================
     def _toggle_playback(self):
         if not self.video_path or not os.path.exists(self.video_path):
-            messagebox.showwarning("Kein Video", "Bitte wähle zuerst ein Video aus!")
+            messagebox.showwarning("Kein Medium", "Bitte wähle zuerst ein Video oder Foto aus!")
+            return
+
+        if getattr(self, "media_type", "video") == "image":
+            self.lbl_status.configure(text="📷 Standbild im Player aktiv. Photorealismus & Farbkorrektur in Echtzeit.")
+            self._render_single_frame_at(0.0)
             return
 
         self.is_playing = not self.is_playing
@@ -1247,15 +1253,23 @@ class LuxanixDesktopApp(ctk.CTk):
 
     def _render_single_frame_at(self, sec):
         def task():
-            cap = cv2.VideoCapture(self.video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            target_frame = int(sec * fps)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-            ret, frame_bgr = cap.read()
-            cap.release()
-            if not ret: return
+            if getattr(self, "media_type", "video") == "image":
+                img_bgr = cv2.imread(self.video_path)
+                if img_bgr is not None:
+                    frame_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                else:
+                    pil_img = Image.open(self.video_path).convert("RGB")
+                    frame_rgb = np.array(pil_img)
+            else:
+                cap = cv2.VideoCapture(self.video_path)
+                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                target_frame = int(sec * fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                ret, frame_bgr = cap.read()
+                cap.release()
+                if not ret: return
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             ph = 540
             pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
             small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
@@ -1348,19 +1362,31 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.video_path = file_path
         self.video_info = get_video_info(file_path)
+        self.media_type = self.video_info.get("media_type", "video")
 
         w = self.video_info.get("width", 1920)
         h = self.video_info.get("height", 1080)
         self.fps = self.video_info.get("fps", 60.0)
-        self.total_duration_sec = self.video_info.get("duration_sec", 10.0)
-        self.total_frames = self.video_info.get("total_frames", 300)
+        self.total_duration_sec = self.video_info.get("duration_sec", 5.0 if self.media_type == "image" else 10.0)
+        self.total_frames = self.video_info.get("total_frames", 1 if self.media_type == "image" else 300)
         aspect = self.video_info.get("aspect_ratio", "16:9")
 
-        self.lbl_clip_title.configure(text=f"📄 {os.path.basename(file_path)}")
-        self.lbl_clip_details.configure(
-            text=f"Auflösung: {w}x{h} ({aspect}) | {self.fps:.1f} FPS\nDauer: {self.total_duration_sec:.1f}s ({self.total_frames} Frames)"
-        )
-        self.lbl_media_status.configure(text=f"✅ Geladen: {os.path.basename(file_path)}")
+        if self.media_type == "image":
+            self.lbl_clip_title.configure(text=f"📷 {os.path.basename(file_path)}")
+            self.lbl_clip_details.configure(
+                text=f"Bild-Auflösung: {w}x{h} ({aspect})\nStatus: Standbild bereit für RTX Remaster & AI-Upscaling"
+            )
+            self.lbl_media_status.configure(text=f"✅ Foto geladen: {os.path.basename(file_path)}")
+            self.btn_export.configure(text="🚀 Bild exportieren")
+            self.lbl_status.configure(text=f"📷 Foto '{os.path.basename(file_path)}' geladen! Bereit für RTX Photorealismus & 8K Upscale.")
+        else:
+            self.lbl_clip_title.configure(text=f"🎬 {os.path.basename(file_path)}")
+            self.lbl_clip_details.configure(
+                text=f"Auflösung: {w}x{h} ({aspect}) | {self.fps:.1f} FPS\nDauer: {self.total_duration_sec:.1f}s ({self.total_frames} Frames)"
+            )
+            self.lbl_media_status.configure(text=f"✅ Video geladen: {os.path.basename(file_path)}")
+            self.btn_export.configure(text="🚀 Exportieren")
+            self.lbl_status.configure(text=f"🎬 Video '{os.path.basename(file_path)}' geladen.")
 
         # Initialize timeline segments
         self.timeline_segments = [{"start": 0.0, "end": self.total_duration_sec, "title": os.path.splitext(os.path.basename(file_path))[0]}]
@@ -1373,24 +1399,77 @@ class LuxanixDesktopApp(ctk.CTk):
 
     def _choose_video(self):
         file_path = filedialog.askopenfilename(
-            title="Wähle ein Gameplay- oder Simracing-Video",
-            filetypes=[("Video-Dateien", "*.mp4 *.mkv *.avi *.mov *.webm"), ("Alle Dateien", "*.*")]
+            title="Wähle ein Gameplay-Video oder Foto",
+            filetypes=[
+                ("Unterstützte Medien (Videos & Fotos)", "*.mp4 *.mkv *.avi *.mov *.webm *.png *.jpg *.jpeg *.webp *.bmp *.tiff"),
+                ("Video-Dateien", "*.mp4 *.mkv *.avi *.mov *.webm"),
+                ("Bild-Dateien", "*.png *.jpg *.jpeg *.webp *.bmp *.tiff"),
+                ("Alle Dateien", "*.*")
+            ]
         )
         if not file_path:
             return
         self.load_video(file_path)
 
     # =========================================================================
-    # EXPORT PIPELINE (FULL TIMELINE WITH REAL AI-UPSCALING & AV1 NVENC)
+    # EXPORT PIPELINE (PHOTOS & VIDEOS WITH DIRECT NVENC & AI-UPSCALING)
     # =========================================================================
     def _start_full_render(self):
         if not self.video_path or not os.path.exists(self.video_path):
-            messagebox.showwarning("Kein Video", "Bitte wähle zuerst ein Video aus!")
+            messagebox.showwarning("Kein Medium", "Bitte wähle zuerst ein Video oder Foto aus!")
             return
 
         if self.is_rendering:
             return
 
+        choice = self.combo_upscale.get()
+        if "8K" in choice:
+            out_res = "8K Ultra HD (4320p)"
+        elif "4K" in choice:
+            out_res = "4K Ultra HD (2160p)"
+        elif "2K" in choice:
+            out_res = "1440p 2K QHD"
+        else:
+            out_res = "Original"
+
+        # --- PHOTO EXPORT ---
+        if getattr(self, "media_type", "video") == "image":
+            self.is_rendering = True
+            self.btn_export.configure(state="disabled", text="⏳ Rendert Bild...")
+            self.lbl_status.configure(text=f"⚡ Rendere Foto mit RTX Raytracing & Neural AI Super-Resolution ({out_res})...")
+
+            output_dir = os.path.join(os.path.expanduser("~"), "Pictures", "Luxanix_Renders")
+            os.makedirs(output_dir, exist_ok=True)
+
+            base_name = os.path.splitext(os.path.basename(self.video_path))[0]
+            tag = "8K" if "8K" in choice else ("4K" if "4K" in choice else ("2K" if "2K" in choice else "Original"))
+            out_file = os.path.join(output_dir, f"{base_name}_Luxanix_RTX_{tag}.png")
+
+            img_params = {
+                "auto_realism": True,
+                "realism_intensity": self.realism_intensity,
+                "neural_upscale": bool(self.sw_neural.get()),
+                "output_resolution": out_res,
+                "denoise": True
+            }
+
+            def render_image_thread():
+                try:
+                    if self.pipeline is None:
+                        self.pipeline = VideoPipeline()
+                    rendered_path = self.pipeline.process_image(
+                        input_path=self.video_path,
+                        output_path=out_file,
+                        params=img_params
+                    )
+                    self.after(0, lambda: self._on_render_complete(rendered_path))
+                except Exception as e:
+                    self.after(0, lambda err=str(e): self._on_render_error(err))
+
+            threading.Thread(target=render_image_thread, daemon=True).start()
+            return
+
+        # --- VIDEO EXPORT ---
         self.is_rendering = True
         self.is_playing = False
         self.btn_export.configure(state="disabled", text="⏳ Rendert...")
@@ -1401,30 +1480,23 @@ class LuxanixDesktopApp(ctk.CTk):
         base_name = os.path.splitext(os.path.basename(self.video_path))[0]
         out_file = os.path.join(output_dir, f"{base_name}_Luxanix_RTX_Remaster.mp4")
 
-        # Check target resolution & auto-tune hardware encoder
         prof_settings = get_profile_settings(self.current_profile_key)
         preferred_codec = prof_settings.get("encoder_codec", "hevc_nvenc")
         nvenc_p = prof_settings.get("nvenc_preset", "p7")
 
-        choice = self.combo_upscale.get()
         if "8K" in choice:
-            out_res = "8K Ultra HD (4320p)"
             codec = "av1_nvenc" if preferred_codec == "av1_nvenc" else "hevc_nvenc"
             bitrate = 80
         elif "4K" in choice:
-            out_res = "4K Ultra HD (2160p)"
             codec = preferred_codec
             bitrate = 50
         elif "2K" in choice:
-            out_res = "1440p 2K QHD"
             codec = preferred_codec
             bitrate = 35
         else:
-            out_res = "Original"
             codec = preferred_codec
             bitrate = 25
 
-        # Render parameters
         params = {
             "auto_realism": True,
             "realism_intensity": self.realism_intensity,
@@ -1482,20 +1554,23 @@ class LuxanixDesktopApp(ctk.CTk):
     def _on_render_complete(self, output_path):
         self.is_rendering = False
         self.progress_bar.set(1.0)
-        self.btn_export.configure(state="normal", text="🚀 Exportieren")
+        btn_txt = "🚀 Bild exportieren" if getattr(self, "media_type", "video") == "image" else "🚀 Exportieren"
+        self.btn_export.configure(state="normal", text=btn_txt)
         self.lbl_status.configure(text=f"✅ Fertig! Gespeichert in: {output_path}")
         self.lbl_eta.configure(text="FERTIG")
 
+        media_name = "Das Foto" if getattr(self, "media_type", "video") == "image" else "Das Video"
         resp = messagebox.askyesno(
             "Render Erfolgreich!",
-            f"Das Video wurde erfolgreich mit RTX & Neural AI-Upscaling gerendert:\n\n{output_path}\n\nMöchtest du den Ordner im Explorer öffnen?"
+            f"{media_name} wurde erfolgreich mit RTX & Neural AI-Upscaling gerendert:\n\n{output_path}\n\nMöchtest du den Ordner im Explorer öffnen?"
         )
         if resp:
             os.system(f'explorer /select,"{output_path}"')
 
     def _on_render_error(self, err_msg):
         self.is_rendering = False
-        self.btn_export.configure(state="normal", text="🚀 Exportieren")
+        btn_txt = "🚀 Bild exportieren" if getattr(self, "media_type", "video") == "image" else "🚀 Exportieren"
+        self.btn_export.configure(state="normal", text=btn_txt)
         self.lbl_status.configure(text=f"Fehler: {err_msg}")
         messagebox.showerror("Fehler beim Rendern", f"Ein Fehler ist aufgetreten:\n{err_msg}")
 

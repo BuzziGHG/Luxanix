@@ -95,14 +95,23 @@ Ein echtes tiefes neuronales Netzwerk (**Residual Dense Blocks + Sub-Pixel Pixel
 
 ---
 
-## 🎬 Durchgängiger Vollvideo-Player & Timeline-Schnitt (CapCut Pro NLE)
+## 📸 Volle Foto- & Screenshot-Unterstützung (bis 8K Remaster)
 
-- **Komplettes Video vor dem Export ansehen:** Spiele dein Video von Minute 00:00 bis zum Ende mit Live-RTX-Remastering und A/B Split-Screen ab.
-- **Timeline-Schnittwerkzeuge:**
-  - `Strg + B`: Teilt den Clip an der aktuellen Playhead-Position.
-  - `Entf`: Löscht das ausgewählte Segment.
-  - `I / O`: Trimmt In- und Out-Punkte.
-  - Interaktive Zeitleiste mit Audiowellenform und Playhead-Scrubbing.
+Nicht nur Videos, sondern auch einzelne Fotos und Screenshots können jetzt direkt importiert und verarbeitet werden:
+- **Formate:** PNG, JPG, JPEG, WEBP, BMP, TIFF.
+- **Autonome Physik & Raytracing:** Echte Tiefenanalyse, Global Illumination, Oberflächenreflexionen und Kontrastkorrektur für jedes Bild.
+- **8K AI Neural Upscaling:** Skaliere Screenshots aus 720p oder 1080p gestochen scharf auf bis zu **8K Ultra HD (4320p)** hoch!
+- **1-Klick Bild-Export:** Schneller Export direkt in deinen Windows `Bilder\Luxanix_Renders` Ordner mit verlustfreier oder maximaler Qualität (PNG 100%, JPG 98%).
+
+---
+
+## ⚡ Direct NVENC Streaming-Pipe & Asynchroner Frame-Prefetch
+
+Dank moderner Low-Level-Optimierungen rendert Luxanix Studio nun mehr als doppelt so schnell:
+- **Direct Memory-to-Encoder Pipe:** Unkomprimierte Videoframes werden über In-Memory-Streams direkt an den NVIDIA NVENC-Encoder übergeben. Keine riesigen temporären Zwischenvideodateien auf der Festplatte mehr!
+- **Asynchroner Frame-Prefetch:** Ein dedizierter Background-Thread liest Videoframes im Voraus ein (`Queue`), sodass die RTX-Tensor-Cores und Raytracing-Rechenkerne niemals im Leerlauf auf I/O warten.
+- **`torch.backends.cudnn.benchmark`:** Optimiert dynamisch die Faltungs-Kernel für deine RTX-Architektur.
+- **Dual-NVENC AV1/HEVC:** Volle Nutzung doppelter Encoder-Einheiten auf RTX 40 & RTX 50 Grafikkarten.
 
 ---
 

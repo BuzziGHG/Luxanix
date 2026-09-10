@@ -203,8 +203,9 @@ namespace LuxanixLauncher
             {
                 Text = "✨ Features:\n" +
                        "• CapCut Pro NLE Layout\n" +
+                       "• Video & Foto Remastering\n" +
                        "• RTX 50 Blackwell RTGI\n" +
-                       "• AV1 Dual-NVENC 8K\n" +
+                       "• AV1 Direct Pipe 8K\n" +
                        "• Auto-Scene Dynamic AI\n" +
                        "• Screen-Space SSR\n" +
                        "• Multi-Track Timeline\n" +

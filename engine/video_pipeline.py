@@ -13,6 +13,8 @@ import os
 import subprocess
 import time
 import math
+import queue
+import threading
 import cv2
 import numpy as np
 import torch
@@ -28,14 +30,86 @@ from .auto_realism import AutonomousRealismEngine
 from .upscaler import NeuralUpscaler
 
 
-def get_video_info(video_path: str) -> Dict[str, Any]:
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tga"}
+
+
+def get_ffmpeg_binary() -> str:
+    """Locates a working FFmpeg binary with NVENC support, checking imageio_ffmpeg if PATH lacks ffmpeg."""
+    import shutil
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    try:
+        import imageio_ffmpeg
+        p = imageio_ffmpeg.get_ffmpeg_exe()
+        if p and os.path.exists(p):
+            return p
+    except Exception:
+        pass
+    return "ffmpeg"
+
+
+def get_video_info(media_path: str) -> Dict[str, Any]:
     """
-    Extracts detailed video metadata for the UI stats card.
+    Extracts detailed metadata for videos or photos for the UI stats card.
     """
-    if not os.path.exists(video_path):
+    if not os.path.exists(media_path):
         return {}
 
-    cap = cv2.VideoCapture(video_path)
+    ext = os.path.splitext(media_path)[1].lower()
+
+    # --- PHOTO / IMAGE MODE ---
+    if ext in IMAGE_EXTENSIONS:
+        img_bgr = cv2.imread(media_path)
+        if img_bgr is not None:
+            height, width = img_bgr.shape[:2]
+        else:
+            try:
+                pil_img = Image.open(media_path)
+                width, height = pil_img.size
+            except Exception:
+                width, height = 1920, 1080
+
+        gcd_val = math.gcd(width, height) if (width > 0 and height > 0) else 1
+        aspect_w = width // gcd_val
+        aspect_h = height // gcd_val
+
+        if abs(width / max(1, height) - 16 / 9) < 0.05:
+            aspect_label = "16:9 (Breitbild)"
+        elif abs(width / max(1, height) - 21 / 9) < 0.1:
+            aspect_label = "21:9 (Ultrawide)"
+        elif abs(width / max(1, height) - 9 / 16) < 0.05:
+            aspect_label = "9:16 (Vertikal / Story)"
+        elif abs(width / max(1, height) - 1.0) < 0.05:
+            aspect_label = "1:1 (Quadrat)"
+        else:
+            aspect_label = f"{aspect_w}:{aspect_h}"
+
+        if height >= 2160 or width >= 3840:
+            res_label = f"4K Ultra HD ({width} x {height})"
+        elif height >= 1440 or width >= 2560:
+            res_label = f"1440p 2K QHD ({width} x {height})"
+        elif height >= 1080 or width >= 1920:
+            res_label = f"1080p Full HD ({width} x {height})"
+        elif height >= 720:
+            res_label = f"720p HD ({width} x {height})"
+        else:
+            res_label = f"{width} x {height} SD"
+
+        return {
+            "media_type": "image",
+            "width": width,
+            "height": height,
+            "fps": 30.0,
+            "total_frames": 1,
+            "duration_sec": 5.0,
+            "duration_str": "Standbild (5.0s Clip)",
+            "aspect_ratio": aspect_label,
+            "resolution_label": res_label,
+        }
+
+    # --- VIDEO MODE ---
+    cap = cv2.VideoCapture(media_path)
     if not cap.isOpened():
         return {}
 
@@ -46,7 +120,6 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
     duration_sec = total_frames / fps if fps > 0 else 0.0
     cap.release()
 
-    # Determine Aspect Ratio
     gcd_val = math.gcd(width, height) if (width > 0 and height > 0) else 1
     aspect_w = width // gcd_val
     aspect_h = height // gcd_val
@@ -64,7 +137,6 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
     else:
         aspect_label = f"{aspect_w}:{aspect_h}"
 
-    # Determine Resolution Label
     if height >= 2160 or width >= 3840:
         res_label = f"4K Ultra HD ({width} x {height})"
     elif height >= 1440 or width >= 2560:
@@ -76,12 +148,12 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
     else:
         res_label = f"{width} x {height} SD"
 
-    # Format duration
     mins = int(duration_sec // 60)
     secs = int(duration_sec % 60)
     duration_str = f"{mins:02d}:{secs:02d} ({duration_sec:.1f}s)"
 
     return {
+        "media_type": "video",
         "width": width,
         "height": height,
         "fps": round(fps, 2),
@@ -91,6 +163,9 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
         "aspect_ratio": aspect_label,
         "resolution_label": res_label,
     }
+
+
+get_media_info = get_video_info
 
 
 class VideoPipeline:
@@ -108,6 +183,12 @@ class VideoPipeline:
         self.use_fp16 = use_fp16 and (self.device.type == "cuda")
         self.dtype = torch.float16 if self.use_fp16 else torch.float32
 
+        if self.device.type == "cuda":
+            try:
+                torch.backends.cudnn.benchmark = True
+            except Exception:
+                pass
+
         if depth_estimator is not None:
             self.depth_estimator = depth_estimator
         else:
@@ -120,6 +201,7 @@ class VideoPipeline:
         self.auto_realism = AutonomousRealismEngine()
         self.upscaler = NeuralUpscaler(device=self.device, use_fp16=self.use_fp16)
 
+    @torch.inference_mode()
     def process_single_frame(
         self,
         frame_rgb: np.ndarray,
@@ -156,22 +238,21 @@ class VideoPipeline:
         color_tensor = torch.from_numpy(color_np).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.dtype)
 
         # 3. Ray Tracing
-        with torch.no_grad():
-            rt_results = self.raytracer.trace(color_tensor, depth, params)
+        rt_results = self.raytracer.trace(color_tensor, depth, params)
 
-            # 4. Denoise RTGI & SSR
-            if params.get("denoise", True):
-                if params.get("rtgi_intensity", 0.65) > 0:
-                    rt_results["rtgi"] = self.denoiser.denoise(
-                        rt_results["rtgi"], depth, rt_results["normals"]
-                    )
-                if params.get("ssr_intensity", 0.5) > 0:
-                    rt_results["ssr"] = self.denoiser.denoise(
-                        rt_results["ssr"], depth, rt_results["normals"]
-                    )
+        # 4. Denoise RTGI & SSR
+        if params.get("denoise", True):
+            if params.get("rtgi_intensity", 0.65) > 0:
+                rt_results["rtgi"] = self.denoiser.denoise(
+                    rt_results["rtgi"], depth, rt_results["normals"]
+                )
+            if params.get("ssr_intensity", 0.5) > 0:
+                rt_results["ssr"] = self.denoiser.denoise(
+                    rt_results["ssr"], depth, rt_results["normals"]
+                )
 
-            # 5. Color Grading, Detail Clarity & Compositing
-            output_tensor = self.grader.grade(color_tensor, rt_results, params)
+        # 5. Color Grading, Detail Clarity & Compositing
+        output_tensor = self.grader.grade(color_tensor, rt_results, params)
 
         # Convert back to uint8 numpy
         out_np = (output_tensor.squeeze(0).permute(1, 2, 0).cpu().float().numpy() * 255.0).clip(0, 255).astype(np.uint8)
@@ -195,6 +276,154 @@ class VideoPipeline:
 
         return out_np, depth_viz, normals_viz
 
+    @torch.inference_mode()
+    def process_image(
+        self,
+        input_path: str,
+        output_path: str,
+        params: Dict[str, Any],
+    ) -> str:
+        """
+        Processes a single photo/screenshot with full autonomous realism,
+        RTX raytracing, color grading, and optional neural AI upscaling (up to 8K).
+        """
+        img_bgr = cv2.imread(input_path)
+        if img_bgr is None:
+            pil_img = Image.open(input_path).convert("RGB")
+            img_rgb = np.array(pil_img)
+        else:
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+        orig_h, orig_w = img_rgb.shape[:2]
+
+        # 1. RTX Raytracing Engine
+        out_rgb, _, _ = self.process_single_frame(img_rgb, params)
+
+        # 2. Target Output Resolution (1080p, 1440p, 4K UHD, 8K Ultra-Upscaling)
+        out_res_choice = str(params.get("output_resolution", "Original"))
+        out_w, out_h = orig_w, orig_h
+        if "1080p" in out_res_choice and orig_h != 1080:
+            out_h = 1080
+            out_w = int(orig_w * (1080 / orig_h))
+            out_w = out_w - (out_w % 2)
+        elif "1440p" in out_res_choice and orig_h != 1440:
+            out_h = 1440
+            out_w = int(orig_w * (1440 / orig_h))
+            out_w = out_w - (out_w % 2)
+        elif "4K" in out_res_choice and orig_h != 2160:
+            out_h = 2160
+            out_w = int(orig_w * (2160 / orig_h))
+            out_w = out_w - (out_w % 2)
+        elif "8K" in out_res_choice and orig_h != 4320:
+            out_h = 4320
+            out_w = int(orig_w * (4320 / orig_h))
+            out_w = out_w - (out_w % 2)
+
+        # 3. Neural AI Super-Resolution
+        if (out_w != orig_w) or (out_h != orig_h):
+            if params.get("neural_upscale", True) and (out_h > orig_h):
+                out_rgb = self.upscaler.upscale_frame(out_rgb, target_height=out_h)
+                if out_rgb.shape[1] != out_w or out_rgb.shape[0] != out_h:
+                    out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+            else:
+                out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+
+        # 4. Save with optimal fidelity
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
+
+        ext = os.path.splitext(output_path)[1].lower()
+        if ext in [".jpg", ".jpeg"]:
+            cv2.imwrite(output_path, out_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
+        elif ext == ".webp":
+            cv2.imwrite(output_path, out_bgr, [int(cv2.IMWRITE_WEBP_QUALITY), 98])
+        else:
+            if not ext.endswith(".png"):
+                output_path = os.path.splitext(output_path)[0] + ".png"
+            cv2.imwrite(output_path, out_bgr, [int(cv2.IMWRITE_PNG_COMPRESSION), 3])
+
+        print(f"[Luxanix] Foto erfolgreich gerendert: {out_w}x{out_h} -> {output_path}")
+        return output_path
+
+    def _open_ffmpeg_pipe(
+        self,
+        output_path: str,
+        audio_path: Optional[str],
+        width: int,
+        height: int,
+        fps: float,
+        codec: str = "hevc_nvenc",
+        preset: str = "p7",
+        bitrate_mbps: int = 35,
+        dual_nvenc: bool = False,
+    ) -> Optional[subprocess.Popen]:
+        """
+        Opens a high-throughput FFmpeg pipe to encode frames directly from memory.
+        Avoids writing gigabytes of uncompressed intermediate video files to disk.
+        """
+        codecs_to_try = [codec]
+        if codec == "av1_nvenc":
+            codecs_to_try.extend(["hevc_nvenc", "h264_nvenc"])
+        elif codec == "hevc_nvenc":
+            codecs_to_try.append("h264_nvenc")
+
+        ffmpeg_bin = get_ffmpeg_binary()
+        for cur_codec in codecs_to_try:
+            cmd = [
+                ffmpeg_bin, "-y",
+                "-f", "rawvideo",
+                "-vcodec", "rawvideo",
+                "-s", f"{width}x{height}",
+                "-pix_fmt", "bgr24",
+                "-r", f"{fps:.3f}",
+                "-i", "-", # stdin
+            ]
+            if audio_path and os.path.exists(audio_path):
+                cmd.extend(["-i", audio_path, "-c:a", "copy"])
+
+            cmd.extend([
+                "-c:v", cur_codec,
+                "-preset", preset,
+                "-rc", "vbr",
+                "-cq", "18",
+                "-b:v", f"{bitrate_mbps}M",
+                "-maxrate", f"{bitrate_mbps * 2}M",
+                "-pix_fmt", "yuv420p",
+            ])
+            if dual_nvenc and cur_codec in ["av1_nvenc", "hevc_nvenc"]:
+                cmd.extend(["-split_encode", "1"])
+            cmd.append(output_path)
+
+            try:
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                return proc
+            except Exception:
+                continue
+
+        # CPU fallback pipe
+        try:
+            cmd_cpu = [
+                ffmpeg_bin, "-y",
+                "-f", "rawvideo",
+                "-vcodec", "rawvideo",
+                "-s", f"{width}x{height}",
+                "-pix_fmt", "bgr24",
+                "-r", f"{fps:.3f}",
+                "-i", "-",
+            ]
+            if audio_path and os.path.exists(audio_path):
+                cmd_cpu.extend(["-i", audio_path, "-c:a", "aac"])
+            cmd_cpu.extend([
+                "-c:v", "libx264",
+                "-crf", "18",
+                "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",
+                output_path
+            ])
+            return subprocess.Popen(cmd_cpu, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        except Exception:
+            return None
+
     def process_video(
         self,
         input_path: str,
@@ -205,15 +434,7 @@ class VideoPipeline:
         """
         Processes an entire video file or cut segment with Ray Tracing,
         Color Grading, Audio preservation, and detailed ETA tracking.
-
-        Args:
-            input_path: Path to input video file.
-            output_path: Destination path for output video file.
-            params: Parameters dictionary.
-            progress_callback: Optional callback(curr_frame, total_frames, fps, eta_seconds, elapsed_seconds).
-
-        Returns:
-            Path to rendered video.
+        Leverages direct FFmpeg NVENC streaming and multi-threaded frame prefetching.
         """
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
@@ -284,21 +505,65 @@ class VideoPipeline:
             duration=(trim_end - trim_start) if enable_trim else None
         )
 
-        # Step 2: Prepare video writer
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(temp_video_no_audio, fourcc, fps, (out_w, out_h))
+        nvenc_preset = params.get("nvenc_preset", "p7")
+        codec = params.get("encoder_codec", "hevc_nvenc" if out_h >= 2160 else "h264_nvenc")
+        bitrate_mbps = int(params.get("bitrate_mbps", 60 if out_h >= 4320 else (45 if out_h >= 2160 else 30)))
+        dual_nvenc = params.get("dual_nvenc", False)
 
-        print(f"[Luxanix] Rendere Video {out_w}x{out_h} @ {fps:.1f} FPS, zu berechnen: {total_frames_to_process} Frames...")
+        if (out_w > 4096 or out_h > 4096) and "h264" in codec:
+            codec = "hevc_nvenc"
+
+        # Step 2: Open Direct High-Throughput NVENC Pipe
+        proc = self._open_ffmpeg_pipe(
+            output_path=output_path,
+            audio_path=temp_audio if has_audio else None,
+            width=out_w,
+            height=out_h,
+            fps=fps,
+            codec=codec,
+            preset=nvenc_preset,
+            bitrate_mbps=bitrate_mbps,
+            dual_nvenc=dual_nvenc
+        )
+
+        use_pipe = (proc is not None) and (proc.stdin is not None)
+        writer = None
+        if not use_pipe:
+            # Fallback to intermediate writer
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer = cv2.VideoWriter(temp_video_no_audio, fourcc, fps, (out_w, out_h))
+
+        print(f"[Luxanix] Rendere Video {out_w}x{out_h} @ {fps:.1f} FPS (Direct NVENC Pipe={use_pipe}), Frames: {total_frames_to_process}...")
+
+        # Step 3: Asynchronous Prefetch Reader Thread
+        frame_queue = queue.Queue(maxsize=16)
+        stop_reader = threading.Event()
+
+        def reader_worker():
+            try:
+                cur_pos = start_frame
+                while cur_pos < end_frame and not stop_reader.is_set():
+                    ret, f_bgr = cap.read()
+                    if not ret:
+                        break
+                    frame_queue.put(f_bgr)
+                    cur_pos += 1
+            except Exception:
+                pass
+            finally:
+                frame_queue.put(None)
+
+        t_reader = threading.Thread(target=reader_worker, daemon=True)
+        t_reader.start()
 
         start_time = time.time()
         processed_count = 0
-        empty_cache_freq = int(params.get("empty_cache_freq", 30))
+        empty_cache_freq = int(params.get("empty_cache_freq", 60))
 
         try:
-            current_frame_pos = start_frame
-            while current_frame_pos < end_frame:
-                ret, frame_bgr = cap.read()
-                if not ret:
+            while processed_count < total_frames_to_process:
+                frame_bgr = frame_queue.get()
+                if frame_bgr is None:
                     break
 
                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -306,7 +571,7 @@ class VideoPipeline:
                 # Process through RTX Raytracing engine
                 out_rgb, _, _ = self.process_single_frame(frame_rgb, params)
 
-                # Scale output using Neural AI Super-Resolution if custom resolution selected
+                # Neural AI Super-Resolution if custom resolution requested
                 if (out_w != width) or (out_h != height):
                     if params.get("neural_upscale", True) and (out_h > height):
                         out_rgb = self.upscaler.upscale_frame(out_rgb, target_height=out_h)
@@ -316,10 +581,16 @@ class VideoPipeline:
                         out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
 
                 out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
-                writer.write(out_bgr)
+
+                if use_pipe:
+                    try:
+                        proc.stdin.write(out_bgr.tobytes())
+                    except (BrokenPipeError, OSError):
+                        pass
+                else:
+                    writer.write(out_bgr)
 
                 processed_count += 1
-                current_frame_pos += 1
 
                 # Periodic CUDA cache cleanup
                 if processed_count % empty_cache_freq == 0 and torch.cuda.is_available():
@@ -333,30 +604,30 @@ class VideoPipeline:
                     progress_callback(processed_count, total_frames_to_process, current_fps, eta, elapsed)
 
         finally:
+            stop_reader.set()
             cap.release()
-            writer.release()
+            while not frame_queue.empty():
+                try: frame_queue.get_nowait()
+                except Exception: break
 
-        # Step 3: Combine with audio & encode via NVENC/FFmpeg
-        nvenc_preset = params.get("nvenc_preset", "p7")
-        codec = params.get("encoder_codec", "hevc_nvenc" if out_h >= 2160 else "h264_nvenc")
-        bitrate_mbps = int(params.get("bitrate_mbps", 60 if out_h >= 4320 else (45 if out_h >= 2160 else 30)))
-        dual_nvenc = params.get("dual_nvenc", False)
-
-        # 8K resolution (>4096px) exceeds H.264 level limits; auto-switch to HEVC or AV1
-        if (out_w > 4096 or out_h > 4096) and "h264" in codec:
-            print(f"[Luxanix] 8K-Auflösung ({out_w}x{out_h}) erfordert HEVC oder AV1. Schalte automatisch auf hevc_nvenc um...")
-            codec = "hevc_nvenc"
-
-        self._finalize_video(
-            temp_video_no_audio,
-            temp_audio if has_audio else None,
-            output_path,
-            fps,
-            codec=codec,
-            nvenc_preset=nvenc_preset,
-            bitrate_mbps=bitrate_mbps,
-            dual_nvenc=dual_nvenc,
-        )
+            if use_pipe:
+                try:
+                    proc.stdin.close()
+                    proc.wait(timeout=30)
+                except Exception:
+                    pass
+            elif writer is not None:
+                writer.release()
+                self._finalize_video(
+                    temp_video_no_audio,
+                    temp_audio if has_audio else None,
+                    output_path,
+                    fps,
+                    codec=codec,
+                    nvenc_preset=nvenc_preset,
+                    bitrate_mbps=bitrate_mbps,
+                    dual_nvenc=dual_nvenc,
+                )
 
         # Cleanup temp files
         for tmp in [temp_video_no_audio, temp_audio]:
@@ -377,7 +648,8 @@ class VideoPipeline:
         duration: Optional[float] = None
     ) -> bool:
         """Extracts audio track with optional trim range."""
-        cmd = ["ffmpeg", "-y"]
+        ffmpeg_bin = get_ffmpeg_binary()
+        cmd = [ffmpeg_bin, "-y"]
         if start_time is not None and start_time > 0:
             cmd.extend(["-ss", f"{start_time:.3f}"])
         cmd.extend(["-i", video_path])
@@ -406,6 +678,8 @@ class VideoPipeline:
         Combines video and audio with NVIDIA NVENC hardware acceleration (AV1, HEVC, H.264).
         Supports Blackwell & Ada Lovelace Dual-NVENC parallel stream encoding.
         """
+        ffmpeg_bin = get_ffmpeg_binary()
+
         # Prioritize requested codec with intelligent hardware fallbacks
         codecs_to_try = [codec]
         if codec == "av1_nvenc":
@@ -414,7 +688,7 @@ class VideoPipeline:
             codecs_to_try.append("h264_nvenc")
 
         for current_codec in codecs_to_try:
-            cmd_nvenc = ["ffmpeg", "-y", "-i", video_path]
+            cmd_nvenc = [ffmpeg_bin, "-y", "-i", video_path]
             if audio_path and os.path.exists(audio_path):
                 cmd_nvenc.extend(["-i", audio_path, "-c:a", "copy"])
 
@@ -440,7 +714,7 @@ class VideoPipeline:
                 pass
 
         # Fallback to libx264
-        cmd_cpu = ["ffmpeg", "-y", "-i", video_path]
+        cmd_cpu = [ffmpeg_bin, "-y", "-i", video_path]
         if audio_path and os.path.exists(audio_path):
             cmd_cpu.extend(["-i", audio_path, "-c:a", "aac"])
         cmd_cpu.extend([
