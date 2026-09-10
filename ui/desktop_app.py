@@ -27,7 +27,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from engine.video_pipeline import VideoPipeline, get_video_info
-from engine.hardware import detect_gpu_hardware, get_profile_settings
+from engine.hardware import detect_gpu_hardware, get_profile_settings, get_all_profiles
 from engine.auto_preset import AutoSceneOptimizer
 
 # Set CustomTkinter appearance
@@ -56,6 +56,17 @@ class LuxanixDesktopApp(ctk.CTk):
         self.pipeline = None
         self.auto_optimizer = AutoSceneOptimizer(smoothing_alpha=0.25)
         self.gpu_info = detect_gpu_hardware()
+        self.current_profile_key = getattr(self.gpu_info, "recommended_profile", "ultra")
+
+        # Load Presets from presets.json
+        self.presets_data = {}
+        presets_file = os.path.join(PROJECT_ROOT, "presets.json")
+        if os.path.exists(presets_file):
+            try:
+                with open(presets_file, "r", encoding="utf-8") as f:
+                    self.presets_data = json.load(f)
+            except Exception:
+                pass
 
         # Playback / Preview State
         self.preview_cap = None
@@ -123,7 +134,35 @@ class LuxanixDesktopApp(ctk.CTk):
             padx=8,
             pady=4
         )
-        self.lbl_gpu.pack(fill="x", padx=16, pady=(0, 14))
+        self.lbl_gpu.pack(fill="x", padx=16, pady=(0, 6))
+
+        # Hardware Architecture & Profile Selector
+        sec_arch = ctk.CTkFrame(self.sidebar, fg_color="#14181d", corner_radius=8)
+        sec_arch.pack(fill="x", padx=14, pady=(0, 10))
+
+        ctk.CTkLabel(
+            sec_arch,
+            text="⚡ RTX-Architektur & Hardware-Profil",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#e2e8f0"
+        ).pack(anchor="w", padx=12, pady=(6, 2))
+
+        self.profile_map = {
+            "🔥 RTX 50 Blackwell (Hyper-Path Tracing & 8K)": "blackwell",
+            "⚡ RTX 40 Ada Lovelace (Ultra Quality)": "ultra",
+            "⚡ RTX 30 Ampere (Ausgewogen)": "balanced",
+            "🌱 RTX 20 Turing (Low-VRAM Saver)": "low_vram",
+        }
+        rec_key = getattr(self.gpu_info, "recommended_profile", "ultra")
+        default_label = next((k for k, v in self.profile_map.items() if v == rec_key), "🔥 RTX 50 Blackwell (Hyper-Path Tracing & 8K)")
+
+        self.opt_arch = ctk.CTkOptionMenu(
+            sec_arch,
+            values=list(self.profile_map.keys()),
+            command=self._on_arch_profile_change
+        )
+        self.opt_arch.set(default_label)
+        self.opt_arch.pack(fill="x", padx=12, pady=(2, 8))
 
         # 1. Video Import Section
         sec_video = ctk.CTkFrame(self.sidebar, fg_color="#14181d", corner_radius=8)
@@ -217,6 +256,31 @@ class LuxanixDesktopApp(ctk.CTk):
         )
         self.lbl_auto_telemetry.pack(anchor="w", padx=12, pady=(0, 8))
 
+        # 3b. Raytracing & Gaming Presets
+        sec_presets = ctk.CTkFrame(self.sidebar, fg_color="#14181d", corner_radius=8)
+        sec_presets.pack(fill="x", padx=14, pady=6)
+
+        ctk.CTkLabel(
+            sec_presets,
+            text="🎮 Raytracing & Gaming Presets",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#e2e8f0"
+        ).pack(anchor="w", padx=12, pady=(8, 2))
+
+        preset_names = list(self.presets_data.keys()) if self.presets_data else [
+            "⚡ RTX 50 Blackwell: Hyper-Path Tracing (8K Ultra)",
+            "⚡ RTX 50 Blackwell: Nürburgring 24h Photorealism",
+            "Simracing: Wet Track & Reflections",
+            "Assetto Corsa / ACC Hyper-Realism"
+        ]
+        self.opt_presets = ctk.CTkOptionMenu(
+            sec_presets,
+            values=preset_names,
+            command=self._on_preset_change
+        )
+        self.opt_presets.set(preset_names[0])
+        self.opt_presets.pack(fill="x", padx=12, pady=(4, 10))
+
         # 4. Manual Shader & Lighting Sliders (Accordion/Frame)
         self.sec_sliders = ctk.CTkFrame(self.sidebar, fg_color="#14181d", corner_radius=8)
         self.sec_sliders.pack(fill="x", padx=14, pady=6)
@@ -256,12 +320,14 @@ class LuxanixDesktopApp(ctk.CTk):
         self.combo_codec = ctk.CTkComboBox(
             sec_export,
             values=[
-                "HEVC / H.265 (NVIDIA NVENC - Empfohlen für 4K/8K)",
-                "H.264 (NVIDIA NVENC - Bis 4K)"
+                "AV1 (NVIDIA RTX 50 & 40 Dual-NVENC — Next-Gen)",
+                "HEVC / H.265 (NVIDIA NVENC — Empfohlen für 4K/8K)",
+                "H.264 (NVIDIA NVENC — Bis 4K)",
+                "libx264 (CPU Software Fallback)"
             ],
             width=340
         )
-        self.combo_codec.set("HEVC / H.265 (NVIDIA NVENC - Empfohlen für 4K/8K)")
+        self.combo_codec.set("AV1 (NVIDIA RTX 50 & 40 Dual-NVENC — Next-Gen)")
         self.combo_codec.pack(fill="x", padx=12, pady=4)
 
         self.slider_bitrate = self._create_slider(sec_export, "Bitrate (Mbps) — für 8K 60-120 Mbps", 10, 160, 60)
@@ -486,15 +552,66 @@ class LuxanixDesktopApp(ctk.CTk):
         else:
             self.lbl_auto_telemetry.configure(text="Dynamik: Deaktiviert (Manuelle Slider-Werte aktiv)", text_color="#f87171")
 
+    def _on_arch_profile_change(self, choice):
+        profile_key = self.profile_map.get(choice, "ultra")
+        self.current_profile_key = profile_key
+        settings = get_profile_settings(profile_key)
+        if profile_key == "blackwell":
+            self.lbl_status.configure(
+                text="🔥 RTX 50 Blackwell aktiv: 18 RTGI Bounces, 24 SSR Steps, 12 RTAO Samples & AV1 Dual-NVENC."
+            )
+            self.combo_codec.set("AV1 (NVIDIA RTX 50 & 40 Dual-NVENC — Next-Gen)")
+        elif profile_key == "ultra":
+            self.lbl_status.configure(text="⚡ RTX 40 / Ultra Profil aktiv (12 RTGI / 16 SSR / HEVC).")
+            self.combo_codec.set("HEVC / H.265 (NVIDIA NVENC — Empfohlen für 4K/8K)")
+        elif profile_key == "balanced":
+            self.lbl_status.configure(text="⚡ RTX 30 Balanced Profil aktiv (10 RTGI / 12 SSR).")
+            self.combo_codec.set("HEVC / H.265 (NVIDIA NVENC — Empfohlen für 4K/8K)")
+        elif profile_key == "low_vram":
+            self.lbl_status.configure(text="🌱 RTX 20 Low-VRAM Profil aktiv (6 RTGI / 8 SSR / Memory-Saver).")
+            self.combo_codec.set("H.264 (NVIDIA NVENC — Bis 4K)")
+
+    def _on_preset_change(self, choice):
+        if choice in self.presets_data:
+            p = self.presets_data[choice]
+            if "rtgi_intensity" in p: self.slider_rtgi.set(p["rtgi_intensity"])
+            if "ssr_intensity" in p: self.slider_ssr.set(p["ssr_intensity"])
+            if "rtao_intensity" in p: self.slider_rtao.set(p["rtao_intensity"])
+            if "clarity" in p: self.slider_clarity.set(p["clarity"])
+            if "exposure" in p: self.slider_exposure.set(p["exposure"])
+            if "contrast" in p: self.slider_contrast.set(p["contrast"])
+            if "bloom_intensity" in p: self.slider_bloom.set(p["bloom_intensity"])
+            if "film_grain" in p: self.slider_grain.set(p["film_grain"])
+
+            if "RTX 50" in choice:
+                self.opt_arch.set("🔥 RTX 50 Blackwell (Hyper-Path Tracing & 8K)")
+                self._on_arch_profile_change("🔥 RTX 50 Blackwell (Hyper-Path Tracing & 8K)")
+
+            self.lbl_status.configure(text=f"Preset '{choice}' geladen!")
+            self._generate_first_frame_preview()
+
     def _collect_params(self):
         is_auto = bool(self.sw_auto_preset.get())
+        codec_choice = self.combo_codec.get()
+        if "AV1" in codec_choice:
+            enc_codec = "av1_nvenc"
+        elif "HEVC" in codec_choice:
+            enc_codec = "hevc_nvenc"
+        elif "CPU" in codec_choice or "libx264" in codec_choice:
+            enc_codec = "libx264"
+        else:
+            enc_codec = "h264_nvenc"
+
+        profile_key = getattr(self, "current_profile_key", "ultra")
+        profile_settings = get_profile_settings(profile_key)
+
         base_params = {
             "auto_preset": is_auto,
             "enable_trim": bool(self.sw_trim.get()),
             "trim_start": float(self.entry_trim_start.get() or 0.0),
             "trim_end": float(self.entry_trim_end.get() or 10.0),
             "output_resolution": self.combo_res.get(),
-            "encoder_codec": "hevc_nvenc" if "HEVC" in self.combo_codec.get() else "h264_nvenc",
+            "encoder_codec": enc_codec,
             "bitrate_mbps": int(self.slider_bitrate.get()),
             "rtgi_intensity": float(self.slider_rtgi.get()),
             "ssr_intensity": float(self.slider_ssr.get()),
@@ -506,6 +623,14 @@ class LuxanixDesktopApp(ctk.CTk):
             "film_grain": float(self.slider_grain.get()),
             "denoise": True,
             "use_aces": True,
+            "rtgi_steps": profile_settings.get("rtgi_steps", 12),
+            "ssr_steps": profile_settings.get("ssr_steps", 16),
+            "rtao_samples": profile_settings.get("rtao_samples", 8),
+            "rtao_radius": profile_settings.get("rtao_radius", 1.4),
+            "max_internal_res": profile_settings.get("max_internal_res", 2160),
+            "dual_nvenc": profile_settings.get("dual_nvenc", False),
+            "nvenc_preset": profile_settings.get("nvenc_preset", "p7"),
+            "empty_cache_freq": profile_settings.get("empty_cache_freq", 60),
         }
         return base_params
 

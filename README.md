@@ -1,14 +1,14 @@
-# ⚡ LUXANIX STUDIO — v1.0.0
+# ⚡ LUXANIX STUDIO — v1.1.0
 
-[![Aktuelle Version](https://img.shields.io/badge/Version-v1.0.0%20(Latest)-76b900.svg?style=for-the-badge&logo=github)](https://github.com/BuzziGHG/Luxanix/releases/latest)
-[![Download Luxanix.exe](https://img.shields.io/badge/📥%20Download-Luxanix.exe%20(v1.0.0)-10b981.svg?style=for-the-badge&logo=windows)](https://github.com/BuzziGHG/Luxanix/releases/latest)
-[![NVIDIA RTX Acceleration](https://img.shields.io/badge/NVIDIA%20RTX-20%20%7C%2030%20%7C%2040%20%7C%2050%20Series-76b900.svg?logo=nvidia)](https://www.nvidia.com)
+[![Aktuelle Version](https://img.shields.io/badge/Version-v1.1.0%20(Blackwell%20Update)-76b900.svg?style=for-the-badge&logo=github)](https://github.com/BuzziGHG/Luxanix/releases/latest)
+[![Download Luxanix.exe](https://img.shields.io/badge/📥%20Download-Luxanix.exe%20(v1.1.0)-10b981.svg?style=for-the-badge&logo=windows)](https://github.com/BuzziGHG/Luxanix/releases/latest)
+[![NVIDIA RTX Acceleration](https://img.shields.io/badge/NVIDIA%20RTX-50%20%7C%2040%20%7C%2030%20%7C%2020%20Series-76b900.svg?logo=nvidia)](https://www.nvidia.com)
 [![PyTorch CUDA](https://img.shields.io/badge/PyTorch-CUDA%2012.4-EE4C2C.svg?logo=pytorch)](https://pytorch.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Verwandle normale Gaming- und Simracing-Videoaufnahmen in photorealistische Meisterwerke mit echtem Screen-Space Raytracing (RTGI, SSR, RTAO), KI-Tiefenrekonstruktion, Auto-Adaptivem AI-Preset, nativer Desktop-App und 8K Ultra HD Upscaling.**
 > 
-> 📥 **[Hier klicken: Neueste Version `Luxanix.exe (v1.0.0)` herunterladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
+> 📥 **[Hier klicken: Neueste Version `Luxanix.exe (v1.1.0)` herunterladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
 
 ---
 
@@ -27,7 +27,7 @@ Normale Schnittprogramme wie CapCut bieten lediglich einfache Farbfilter, besitz
 6. **Ray Traced Ambient Occlusion (RTAO):** Physikalische Kontaktschatten unter dem Fahrzeugchassis und in den Radkästen lassen Autos fest mit der Strecke verschmelzen.
 7. **Detail-Clarity & Texturschärfung (Anti-TAA):** Beseitigt die typische Bewegungsunschärfe moderner Spiele und holt feine Strecken- und Karbondetails hervor.
 8. **Live Render-Monitor mit ETA & Fortschrittsbalken:** Präzise Anzeige von berechneten Frames, aktuellem Prozentwert, Render-FPS und minutengenauer Restzeit-Berechnung.
-9. **NVIDIA NVENC Export & 8K Ultra-Upscaling:** Blitzschneller Hardware-Export von 1080p bis **8K Ultra HD (7680x4320)** mit NVIDIA HEVC NVENC Hardware-Beschleunigung bei 100 % Audio-Erhalt.
+9. **NVIDIA NVENC Export & 8K Ultra-Upscaling:** Blitzschneller Hardware-Export von 1080p bis **8K Ultra HD (7680x4320)** mit NVIDIA AV1 & HEVC NVENC Hardware-Beschleunigung bei 100 % Audio-Erhalt.
 
 ---
 
@@ -37,10 +37,10 @@ Luxanix Studio erkennt deine Grafikkarte automatisch und wählt das passende Spe
 
 | Generation | Architektur | Unterstützte Modelle | Optimierungs-Features |
 | :--- | :--- | :--- | :--- |
-| **Ältere RTX-Karten** | **Turing (RTX 20)** | RTX 2060 (6GB/12GB), 2070, 2080, 2080 Ti | **Low-VRAM Profil:** Automatische adaptive Skalierung gegen VRAM-Überlauf, periodischer CUDA Cache-Flush, Turing NVENC (`preset p4`). |
-| **Aktuelle Generation** | **Ampere (RTX 30)** | RTX 3060, 3070, 3080, **RTX 3080 Ti**, 3090 | **Ultra / Balanced Profil:** Volle Ausnutzung von 12 GB+ VRAM, FP16 Tensor Cores, bis zu 4K-Rendering, NVENC (`preset p6/p7`). |
-| **Neuere Generationen** | **Ada Lovelace (RTX 40)** | RTX 4060, 4070, 4080, 4090 | **Maximum Quality Profil:** 4. Gen Tensor Cores, AV1/Dual-NVENC, ultra-dichte Raymarching-Samples. |
-| **Zukünftige Generationen** | **Blackwell (RTX 50)** | RTX 50-Serie (via Update) | Vorbereitet für Compute 9.0+, SM 10.0 und nächste Tensor-Core Generationen. |
+| **RTX 50-Serie (Neu!)** | **Blackwell** | **RTX 5090 (32GB GDDR7)**, **5080 (16GB)**, **5070 / 5070 Ti**, **5060** | **Hyper-Path Tracing Profil:** 18 RTGI Bounces, 24 SSR Steps, 12 RTAO Samples, native 8K Tensor-Berechnung (4320p), 5. Gen Tensor Cores (BF16/FP8), AV1 Dual-NVENC Hardware-Encoding. |
+| **RTX 40-Serie** | **Ada Lovelace** | RTX 4060, 4070, 4080, 4090 | **Ultra Quality Profil:** 4. Gen Tensor Cores, AV1/Dual-NVENC Support, 12 RTGI / 16 SSR / 8 RTAO. |
+| **RTX 30-Serie** | **Ampere** | RTX 3060, 3070, 3080, **RTX 3080 Ti**, 3090 | **Balanced / Ultra Profil:** Volle Ausnutzung von 12 GB+ VRAM, FP16/BF16 Tensor Cores, bis zu 4K/8K-Rendering, HEVC NVENC (`preset p6/p7`). |
+| **RTX 20-Serie** | **Turing** | RTX 2060 (6GB/12GB), 2070, 2080, 2080 Ti | **Low-VRAM Profil:** Automatische adaptive Skalierung gegen VRAM-Überlauf, periodischer CUDA Cache-Flush, Turing NVENC (`preset p4`). |
 
 ---
 

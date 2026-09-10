@@ -64,7 +64,7 @@ namespace LuxanixLauncher
 
             lblSubtitle = new Label()
             {
-                Text = isInstalled ? "AI Raytracing & Photorealistic Video Remaster (NVIDIA RTX)" : "Permanente Installation & Desktop-Integration (NVIDIA RTX)",
+                Text = isInstalled ? "AI Raytracing & 8K Remaster (NVIDIA RTX 20/30/40/50 Blackwell)" : "Permanente Installation & Desktop-Integration (RTX 50 Ready)",
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
                 Location = new Point(26, 52),
@@ -374,7 +374,7 @@ namespace LuxanixLauncher
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "Luxanix Studio — RTX Video Remaster");
-                        key.SetValue("DisplayVersion", "1.0.0");
+                        key.SetValue("DisplayVersion", "1.1.0");
                         key.SetValue("Publisher", "BuzziGHG");
                         key.SetValue("InstallLocation", targetDir);
                         key.SetValue("DisplayIcon", exePath);

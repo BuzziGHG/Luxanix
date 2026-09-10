@@ -332,12 +332,13 @@ class VideoPipeline:
 
         # Step 3: Combine with audio & encode via NVENC/FFmpeg
         nvenc_preset = params.get("nvenc_preset", "p7")
-        codec = params.get("encoder_codec", "h264_nvenc")
-        bitrate_mbps = int(params.get("bitrate_mbps", 60 if out_h >= 4320 else 35))
+        codec = params.get("encoder_codec", "hevc_nvenc" if out_h >= 2160 else "h264_nvenc")
+        bitrate_mbps = int(params.get("bitrate_mbps", 60 if out_h >= 4320 else (45 if out_h >= 2160 else 30)))
+        dual_nvenc = params.get("dual_nvenc", False)
 
-        # 8K resolution (>4096px) exceeds H.264 level limits; auto-switch to HEVC (H.265)
+        # 8K resolution (>4096px) exceeds H.264 level limits; auto-switch to HEVC or AV1
         if (out_w > 4096 or out_h > 4096) and "h264" in codec:
-            print(f"[Luxanix] 8K-Auflösung ({out_w}x{out_h}) erfordert HEVC / H.265. Schalte automatisch auf hevc_nvenc um...")
+            print(f"[Luxanix] 8K-Auflösung ({out_w}x{out_h}) erfordert HEVC oder AV1. Schalte automatisch auf hevc_nvenc um...")
             codec = "hevc_nvenc"
 
         self._finalize_video(
@@ -348,6 +349,7 @@ class VideoPipeline:
             codec=codec,
             nvenc_preset=nvenc_preset,
             bitrate_mbps=bitrate_mbps,
+            dual_nvenc=dual_nvenc,
         )
 
         # Cleanup temp files
@@ -389,35 +391,47 @@ class VideoPipeline:
         audio_path: Optional[str],
         output_path: str,
         fps: float,
-        codec: str = "h264_nvenc",
+        codec: str = "hevc_nvenc",
         nvenc_preset: str = "p7",
         bitrate_mbps: int = 35,
+        dual_nvenc: bool = False,
     ):
         """
-        Combines video and audio with NVIDIA NVENC hardware acceleration.
+        Combines video and audio with NVIDIA NVENC hardware acceleration (AV1, HEVC, H.264).
+        Supports Blackwell & Ada Lovelace Dual-NVENC parallel stream encoding.
         """
-        cmd_nvenc = ["ffmpeg", "-y", "-i", video_path]
-        if audio_path and os.path.exists(audio_path):
-            cmd_nvenc.extend(["-i", audio_path, "-c:a", "copy"])
+        # Prioritize requested codec with intelligent hardware fallbacks
+        codecs_to_try = [codec]
+        if codec == "av1_nvenc":
+            codecs_to_try.extend(["hevc_nvenc", "h264_nvenc"])
+        elif codec == "hevc_nvenc":
+            codecs_to_try.append("h264_nvenc")
 
-        cmd_nvenc.extend([
-            "-c:v", codec,
-            "-preset", nvenc_preset,
-            "-rc", "vbr",
-            "-cq", "18",
-            "-b:v", f"{bitrate_mbps}M",
-            "-maxrate", f"{bitrate_mbps * 2}M",
-            "-pix_fmt", "yuv420p",
-            output_path
-        ])
+        for current_codec in codecs_to_try:
+            cmd_nvenc = ["ffmpeg", "-y", "-i", video_path]
+            if audio_path and os.path.exists(audio_path):
+                cmd_nvenc.extend(["-i", audio_path, "-c:a", "copy"])
 
-        try:
-            res = subprocess.run(cmd_nvenc, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                print(f"[Luxanix] NVENC Export erfolgreich mit {codec} ({nvenc_preset}, {bitrate_mbps} Mbps).")
-                return
-        except Exception as e:
-            print(f"[Luxanix] NVENC Export Notiz: {e}. Verwende Fallback...")
+            cmd_nvenc.extend([
+                "-c:v", current_codec,
+                "-preset", nvenc_preset,
+                "-rc", "vbr",
+                "-cq", "18",
+                "-b:v", f"{bitrate_mbps}M",
+                "-maxrate", f"{bitrate_mbps * 2}M",
+                "-pix_fmt", "yuv420p",
+            ])
+            if dual_nvenc and current_codec in ["av1_nvenc", "hevc_nvenc"]:
+                cmd_nvenc.extend(["-split_encode", "1"])
+            cmd_nvenc.append(output_path)
+
+            try:
+                res = subprocess.run(cmd_nvenc, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    print(f"[Luxanix] NVENC Export erfolgreich mit {current_codec} ({nvenc_preset}, {bitrate_mbps} Mbps).")
+                    return
+            except Exception:
+                pass
 
         # Fallback to libx264
         cmd_cpu = ["ffmpeg", "-y", "-i", video_path]
