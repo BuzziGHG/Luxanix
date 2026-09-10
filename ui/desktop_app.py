@@ -214,7 +214,7 @@ class LuxanixDesktopApp(ctk.CTk):
         gpu_name = getattr(self.gpu_info, "device_name", "NVIDIA RTX")
         self.lbl_header_gpu = ctk.CTkLabel(
             right_box,
-            text=f"⚡ {gpu_name} (Tensor Cores Aktiv)",
+            text=f"🟢 Auto-GPU: {gpu_name} (Optimal abgestimmt)",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#76b900",
             fg_color="#172217",
@@ -564,17 +564,39 @@ class LuxanixDesktopApp(ctk.CTk):
         )
         btn_reset_inspector.pack(fill="x", padx=4, pady=3)
 
-        # Hardware & Export Info
-        ctk.CTkLabel(scroll, text="⚡ Hardware & RTX 50", font=ctk.CTkFont(size=11, weight="bold"), text_color="#76b900").pack(anchor="w", padx=4, pady=(12, 4))
-        card_hw = ctk.CTkFrame(scroll, fg_color="#151b22", corner_radius=6)
+        # Fully Autonomous Hardware Auto-Tuning Card
+        ctk.CTkLabel(scroll, text="⚡ Automatische Hardware-Optimierung", font=ctk.CTkFont(size=11, weight="bold"), text_color="#76b900").pack(anchor="w", padx=4, pady=(12, 4))
+        card_hw = ctk.CTkFrame(scroll, fg_color="#131f17", corner_radius=6, border_width=1, border_color="#10b981")
         card_hw.pack(fill="x", padx=2, pady=4)
 
         gpu_name = getattr(self.gpu_info, "device_name", "NVIDIA RTX")
         vram = getattr(self.gpu_info, "vram_gb", 12.0)
-        ctk.CTkLabel(card_hw, text=f"• GPU: {gpu_name}", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w", padx=8, pady=(6, 1))
-        ctk.CTkLabel(card_hw, text=f"• VRAM: {vram:.1f} GB GDDR6X", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w", padx=8, pady=1)
-        ctk.CTkLabel(card_hw, text="• Tensor Cores: Gen 3/4/5 FP16", font=ctk.CTkFont(size=10), text_color="#76b900").pack(anchor="w", padx=8, pady=1)
-        ctk.CTkLabel(card_hw, text="• Dual-NVENC AV1/HEVC: Bereit", font=ctk.CTkFont(size=10), text_color="#00c4cc").pack(anchor="w", padx=8, pady=(1, 6))
+        gen = getattr(self.gpu_info, "generation", "RTX")
+        prof = getattr(self.gpu_info, "recommended_profile", "ultra").upper()
+
+        ctk.CTkLabel(
+            card_hw,
+            text="🟢 100% Automatisch konfiguriert",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#34d399"
+        ).pack(anchor="w", padx=8, pady=(6, 2))
+
+        ctk.CTkLabel(
+            card_hw,
+            text=f"• Erkannte GPU: {gpu_name}\n• Generation: {gen}\n• Grafikspeicher: {vram:.1f} GB VRAM\n• Performance-Profil: {prof} (Auto)\n• Tensor Cores: FP16/BF16 Hardware-Pass\n• NVENC Encoder: Automatisch gewählt",
+            font=ctk.CTkFont(size=9),
+            text_color="#cbd5e1",
+            justify="left"
+        ).pack(anchor="w", padx=8, pady=(0, 4))
+
+        ctk.CTkLabel(
+            card_hw,
+            text="Du musst deine Grafikkarte nicht auswählen. Die App stimmt VRAM-Cache, Shader-Samples und Encoder-Presets vollautomatisch auf dein System ab.",
+            font=ctk.CTkFont(size=8),
+            text_color="#6ee7b7",
+            justify="left",
+            wraplength=200
+        ).pack(anchor="w", padx=8, pady=(0, 6))
 
     # 3. BOTTOM MULTI-TRACK TIMELINE
     def _build_bottom_timeline(self):
@@ -1124,23 +1146,27 @@ class LuxanixDesktopApp(ctk.CTk):
         base_name = os.path.splitext(os.path.basename(self.video_path))[0]
         out_file = os.path.join(output_dir, f"{base_name}_Luxanix_RTX_Remaster.mp4")
 
-        # Check target resolution from Upscaler combo
+        # Check target resolution & auto-tune hardware encoder
+        prof_settings = get_profile_settings(self.current_profile_key)
+        preferred_codec = prof_settings.get("encoder_codec", "hevc_nvenc")
+        nvenc_p = prof_settings.get("nvenc_preset", "p7")
+
         choice = self.combo_upscale.get()
         if "8K" in choice:
             out_res = "8K Ultra HD (4320p)"
-            codec = "av1_nvenc"
+            codec = "av1_nvenc" if preferred_codec == "av1_nvenc" else "hevc_nvenc"
             bitrate = 80
         elif "4K" in choice:
             out_res = "4K Ultra HD (2160p)"
-            codec = "hevc_nvenc"
+            codec = preferred_codec
             bitrate = 50
         elif "2K" in choice:
             out_res = "1440p 2K QHD"
-            codec = "hevc_nvenc"
+            codec = preferred_codec
             bitrate = 35
         else:
             out_res = "Original"
-            codec = "hevc_nvenc"
+            codec = preferred_codec
             bitrate = 25
 
         # Render parameters
@@ -1154,7 +1180,7 @@ class LuxanixDesktopApp(ctk.CTk):
             "enable_trim": True,
             "trim_start": self.timeline_segments[0]["start"] if self.timeline_segments else 0.0,
             "trim_end": self.timeline_segments[-1]["end"] if self.timeline_segments else self.total_duration_sec,
-            "nvenc_preset": "p7",
+            "nvenc_preset": nvenc_p,
             "denoise": True
         }
 
