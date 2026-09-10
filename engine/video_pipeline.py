@@ -282,11 +282,17 @@ class VideoPipeline:
         input_path: str,
         output_path: str,
         params: Dict[str, Any],
+        cancel_event: Optional[threading.Event] = None,
     ) -> str:
         """
         Processes a single photo/screenshot with full autonomous realism,
         RTX raytracing, color grading, and optional neural AI upscaling (up to 8K).
+        Supports instant cancellation via cancel_event.
         """
+        c_evt = cancel_event or params.get("cancel_event", None)
+        if c_evt is not None and c_evt.is_set():
+            raise InterruptedError("Foto-Export durch Benutzer abgebrochen.")
+
         img_bgr = cv2.imread(input_path)
         if img_bgr is None:
             pil_img = Image.open(input_path).convert("RGB")
@@ -296,8 +302,14 @@ class VideoPipeline:
 
         orig_h, orig_w = img_rgb.shape[:2]
 
+        if c_evt is not None and c_evt.is_set():
+            raise InterruptedError("Foto-Export durch Benutzer abgebrochen.")
+
         # 1. RTX Raytracing Engine
         out_rgb, _, _ = self.process_single_frame(img_rgb, params)
+
+        if c_evt is not None and c_evt.is_set():
+            raise InterruptedError("Foto-Export durch Benutzer abgebrochen.")
 
         # 2. Target Output Resolution (1080p, 1440p, 4K UHD, 8K Ultra-Upscaling)
         out_res_choice = str(params.get("output_resolution", "Original"))
@@ -321,12 +333,17 @@ class VideoPipeline:
 
         # 3. Neural AI Super-Resolution
         if (out_w != orig_w) or (out_h != orig_h):
+            if c_evt is not None and c_evt.is_set():
+                raise InterruptedError("Foto-Export durch Benutzer abgebrochen.")
             if params.get("neural_upscale", True) and (out_h > orig_h):
                 out_rgb = self.upscaler.upscale_frame(out_rgb, target_height=out_h)
                 if out_rgb.shape[1] != out_w or out_rgb.shape[0] != out_h:
                     out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
             else:
                 out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+
+        if c_evt is not None and c_evt.is_set():
+            raise InterruptedError("Foto-Export durch Benutzer abgebrochen.")
 
         # 4. Save with optimal fidelity
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -424,18 +441,94 @@ class VideoPipeline:
         except Exception:
             return None
 
+    def _prepare_audio_track(
+        self,
+        orig_audio_path: Optional[str],
+        music_path: Optional[str],
+        output_audio_path: str,
+        video_volume: float = 1.0,
+        music_volume: float = 1.0,
+        duration_sec: Optional[float] = None,
+        mute_video_audio: bool = False
+    ) -> bool:
+        """
+        Mixes original video audio and optional background music into a single synchronized AAC track.
+        Handles volume leveling, trimming, and muting.
+        """
+        ffmpeg_bin = get_ffmpeg_binary()
+        has_orig = bool(orig_audio_path and os.path.exists(orig_audio_path) and not mute_video_audio and video_volume > 0.001)
+        has_music = bool(music_path and os.path.exists(music_path) and music_volume > 0.001)
+
+        if not has_orig and not has_music:
+            return False
+
+        try:
+            # Case 1: Both Original Audio AND Background Music -> Mix with FFmpeg amix
+            if has_orig and has_music:
+                filter_str = f"[0:a]volume={video_volume:.2f}[a0];[1:a]volume={music_volume:.2f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-i", orig_audio_path,
+                    "-i", music_path,
+                    "-filter_complex", filter_str,
+                    "-map", "[aout]",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                ]
+                if duration_sec is not None and duration_sec > 0:
+                    cmd.extend(["-t", f"{duration_sec:.3f}"])
+                cmd.append(output_audio_path)
+
+            # Case 2: Only Music (video has no audio or original audio is muted)
+            elif has_music:
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-i", music_path,
+                    "-af", f"volume={music_volume:.2f}",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                ]
+                if duration_sec is not None and duration_sec > 0:
+                    cmd.extend(["-t", f"{duration_sec:.3f}"])
+                cmd.append(output_audio_path)
+
+            # Case 3: Only Original Audio
+            else:
+                if abs(video_volume - 1.0) < 0.01:
+                    cmd = [ffmpeg_bin, "-y", "-i", orig_audio_path, "-c:a", "copy", output_audio_path]
+                else:
+                    cmd = [
+                        ffmpeg_bin, "-y",
+                        "-i", orig_audio_path,
+                        "-af", f"volume={video_volume:.2f}",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        output_audio_path
+                    ]
+
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return (res.returncode == 0) and os.path.exists(output_audio_path) and (os.path.getsize(output_audio_path) > 0)
+        except Exception as e:
+            print(f"[Luxanix Audio] Warnung beim Mischen der Audio-Spuren: {e}")
+            return False
+
     def process_video(
         self,
         input_path: str,
         output_path: str,
         params: Dict[str, Any],
         progress_callback: Optional[Callable[[int, int, float, float, float], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> str:
         """
         Processes an entire video file or cut segment with Ray Tracing,
-        Color Grading, Audio preservation, and detailed ETA tracking.
-        Leverages direct FFmpeg NVENC streaming and multi-threaded frame prefetching.
+        Color Grading, Multi-Track Audio preservation, and detailed ETA tracking.
+        Leverages direct FFmpeg NVENC streaming, frame prefetching, and instant cancel support.
         """
+        c_evt = cancel_event or params.get("cancel_event", None)
+        if c_evt is not None and c_evt.is_set():
+            raise InterruptedError("Video-Render vor dem Start durch Benutzer abgebrochen.")
+
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
             raise ValueError(f"Kann Video nicht öffnen: {input_path}")
@@ -495,14 +588,35 @@ class VideoPipeline:
             out_h = 8192
 
         temp_video_no_audio = output_path.replace(".mp4", "_temp_raw.mp4")
-        temp_audio = output_path.replace(".mp4", "_audio.aac")
+        temp_extracted_audio = output_path.replace(".mp4", "_orig_audio.aac")
+        final_audio = output_path.replace(".mp4", "_final_audio.aac")
 
-        # Step 1: Extract trimmed audio
-        has_audio = self._extract_audio(
-            input_path,
-            temp_audio,
-            start_time=trim_start if enable_trim else None,
-            duration=(trim_end - trim_start) if enable_trim else None
+        # Audio options
+        music_path = params.get("music_path", None)
+        music_volume = float(params.get("music_volume", 1.0))
+        video_volume = float(params.get("video_volume", 1.0))
+        mute_video_audio = bool(params.get("mute_video_audio", False))
+        clip_duration = (trim_end - trim_start) if enable_trim else total_duration
+
+        # Step 1: Extract trimmed audio from original video
+        has_orig_audio = False
+        if not mute_video_audio and video_volume > 0.001:
+            has_orig_audio = self._extract_audio(
+                input_path,
+                temp_extracted_audio,
+                start_time=trim_start if enable_trim else None,
+                duration=clip_duration if enable_trim else None
+            )
+
+        # Step 1B: Prepare & mix audio tracks (Original + Background Music)
+        has_final_audio = self._prepare_audio_track(
+            orig_audio_path=temp_extracted_audio if has_orig_audio else None,
+            music_path=music_path,
+            output_audio_path=final_audio,
+            video_volume=video_volume,
+            music_volume=music_volume,
+            duration_sec=clip_duration,
+            mute_video_audio=mute_video_audio
         )
 
         nvenc_preset = params.get("nvenc_preset", "p7")
@@ -516,7 +630,7 @@ class VideoPipeline:
         # Step 2: Open Direct High-Throughput NVENC Pipe
         proc = self._open_ffmpeg_pipe(
             output_path=output_path,
-            audio_path=temp_audio if has_audio else None,
+            audio_path=final_audio if has_final_audio else None,
             width=out_w,
             height=out_h,
             fps=fps,
@@ -562,6 +676,29 @@ class VideoPipeline:
 
         try:
             while processed_count < total_frames_to_process:
+                # Check for cancellation
+                if c_evt is not None and c_evt.is_set():
+                    print("[Luxanix] Render durch Benutzer abgebrochen!")
+                    stop_reader.set()
+                    if use_pipe and proc is not None:
+                        try:
+                            proc.stdin.close()
+                            proc.kill()
+                        except Exception:
+                            pass
+                    elif writer is not None:
+                        try:
+                            writer.release()
+                        except Exception:
+                            pass
+                    for p in [output_path, temp_video_no_audio, temp_extracted_audio, final_audio]:
+                        if os.path.exists(p):
+                            try:
+                                os.remove(p)
+                            except Exception:
+                                pass
+                    raise InterruptedError("Video-Render durch Benutzer abgebrochen.")
+
                 frame_bgr = frame_queue.get()
                 if frame_bgr is None:
                     break
@@ -610,27 +747,40 @@ class VideoPipeline:
                 try: frame_queue.get_nowait()
                 except Exception: break
 
-            if use_pipe:
-                try:
-                    proc.stdin.close()
-                    proc.wait(timeout=30)
-                except Exception:
-                    pass
-            elif writer is not None:
-                writer.release()
-                self._finalize_video(
-                    temp_video_no_audio,
-                    temp_audio if has_audio else None,
-                    output_path,
-                    fps,
-                    codec=codec,
-                    nvenc_preset=nvenc_preset,
-                    bitrate_mbps=bitrate_mbps,
-                    dual_nvenc=dual_nvenc,
-                )
+            if c_evt is not None and c_evt.is_set():
+                if use_pipe and proc is not None:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                for p in [output_path, temp_video_no_audio, temp_extracted_audio, final_audio]:
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except Exception:
+                            pass
+            else:
+                if use_pipe:
+                    try:
+                        proc.stdin.close()
+                        proc.wait(timeout=30)
+                    except Exception:
+                        pass
+                elif writer is not None:
+                    writer.release()
+                    self._finalize_video(
+                        temp_video_no_audio,
+                        final_audio if has_final_audio else None,
+                        output_path,
+                        fps,
+                        codec=codec,
+                        nvenc_preset=nvenc_preset,
+                        bitrate_mbps=bitrate_mbps,
+                        dual_nvenc=dual_nvenc,
+                    )
 
         # Cleanup temp files
-        for tmp in [temp_video_no_audio, temp_audio]:
+        for tmp in [temp_video_no_audio, temp_extracted_audio, final_audio]:
             if os.path.exists(tmp):
                 try:
                     os.remove(tmp)

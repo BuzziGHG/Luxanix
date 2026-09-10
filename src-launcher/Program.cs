@@ -204,15 +204,15 @@ namespace LuxanixLauncher
                 Text = "✨ Features:\n" +
                        "• CapCut Pro NLE Layout\n" +
                        "• Video & Foto Remastering\n" +
+                       "• Multi-Track Audio (A1 & A2)\n" +
+                       "• 1-Klick Export-Abbruch\n" +
                        "• RTX 50 Blackwell RTGI\n" +
                        "• AV1 Direct Pipe 8K\n" +
                        "• Auto-Scene Dynamic AI\n" +
-                       "• Screen-Space SSR\n" +
-                       "• Multi-Track Timeline\n" +
                        "• Permanente Desktop-App",
-                Font = new Font("Segoe UI", 9),
+                Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Color.FromArgb(148, 163, 184),
-                Location = new Point(16, 120),
+                Location = new Point(16, 115),
                 Size = new Size(160, 260)
             };
 

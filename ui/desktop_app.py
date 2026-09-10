@@ -82,6 +82,14 @@ class LuxanixDesktopApp(ctk.CTk):
         self.realism_intensity = 1.0
         self.is_rendering = False
 
+        # Cancellation & Multi-Track Audio
+        self.cancel_render_event = threading.Event()
+        self.music_path = None
+        self.music_info = {}
+        self.music_volume = 1.0
+        self.video_volume = 1.0
+        self.mute_video_audio = False
+
         # Live telemetry metrics
         self.telemetry = {
             "exposure": 0.0,
@@ -258,6 +266,20 @@ class LuxanixDesktopApp(ctk.CTk):
             command=self._start_full_render
         )
         self.btn_export.pack(side="left")
+
+        self.btn_cancel_export = ctk.CTkButton(
+            right_box,
+            text="🛑 Abbrechen",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#991b1b",
+            hover_color="#dc2626",
+            text_color="#ffffff",
+            width=100,
+            height=30,
+            corner_radius=5,
+            command=self._cancel_render
+        )
+        # Not packed initially, only shown during render
 
     # 2. CENTER WORKSPACE (Left Library, Center Player, Right Inspector)
     def _build_center_workspace(self):
@@ -479,23 +501,81 @@ class LuxanixDesktopApp(ctk.CTk):
             command=self._reset_color_settings
         ).pack(fill="x", padx=4, pady=6)
 
-        # --- TAB: AUDIO SPUR (CapCut) ---
+        # --- TAB: AUDIO & MUSIK SPUREN (CapCut Multi-Track NLE) ---
         scroll_aud = ctk.CTkScrollableFrame(tab_audio, fg_color="transparent")
         scroll_aud.pack(fill="both", expand=True, padx=2, pady=2)
 
-        ctk.CTkLabel(scroll_aud, text="🎵 Audio-Spur & Pegel", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=4, pady=(4, 6))
+        # 1. Original Video Audio Card (Spur A1)
+        card_a1 = ctk.CTkFrame(scroll_aud, fg_color="#121820", corner_radius=6, border_width=1, border_color="#10b981")
+        card_a1.pack(fill="x", padx=2, pady=(4, 8))
 
-        ctk.CTkLabel(scroll_aud, text="Master-Lautstärke (0% - 200%)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
-        self.slider_vol = ctk.CTkSlider(scroll_aud, from_=0.0, to=2.0, button_color="#00c4cc", progress_color="#00c4cc")
+        ctk.CTkLabel(card_a1, text="🔊 Spur A1: Originalton des Videos", font=ctk.CTkFont(size=11, weight="bold"), text_color="#34d399").pack(anchor="w", padx=10, pady=(8, 2))
+
+        vol_row = ctk.CTkFrame(card_a1, fg_color="transparent")
+        vol_row.pack(fill="x", padx=10, pady=(4, 2))
+        ctk.CTkLabel(vol_row, text="Lautstärke:", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_orig_vol_pct = ctk.CTkLabel(vol_row, text="100%", font=ctk.CTkFont(size=10, weight="bold"), text_color="#00e5ff")
+        self.lbl_orig_vol_pct.pack(side="right")
+
+        self.slider_vol = ctk.CTkSlider(card_a1, from_=0.0, to=2.0, button_color="#00c4cc", progress_color="#00c4cc", command=self._on_video_volume_change)
         self.slider_vol.set(1.0)
-        self.slider_vol.pack(fill="x", padx=4, pady=(1, 6))
+        self.slider_vol.pack(fill="x", padx=10, pady=(2, 6))
 
-        self.sw_mute = ctk.CTkSwitch(scroll_aud, text="Audio stummschalten (Mute)", font=ctk.CTkFont(size=10, weight="bold"), progress_color="#f87171")
-        self.sw_mute.pack(anchor="w", padx=6, pady=8)
+        self.sw_mute = ctk.CTkSwitch(card_a1, text="Originalton stummschalten (Mute)", font=ctk.CTkFont(size=10, weight="bold"), progress_color="#f87171", command=self._on_mute_change)
+        self.sw_mute.pack(anchor="w", padx=10, pady=(2, 8))
+
+        # 2. Background Music Track Card (Spur A2)
+        card_a2 = ctk.CTkFrame(scroll_aud, fg_color="#121820", corner_radius=6, border_width=1, border_color="#0284c7")
+        card_a2.pack(fill="x", padx=2, pady=(4, 8))
+
+        ctk.CTkLabel(card_a2, text="🎵 Spur A2: Hintergrundmusik", font=ctk.CTkFont(size=11, weight="bold"), text_color="#38bdf8").pack(anchor="w", padx=10, pady=(8, 4))
+
+        self.btn_import_music = ctk.CTkButton(
+            card_a2,
+            text="➕ Musik hinzufügen (.mp3, .wav, .m4a)",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            text_color="#ffffff",
+            height=28,
+            command=self._choose_music_file
+        )
+        self.btn_import_music.pack(fill="x", padx=10, pady=(2, 6))
+
+        self.lbl_music_file_info = ctk.CTkLabel(
+            card_a2,
+            text="Keine Hintergrundmusik hinzugefügt.",
+            font=ctk.CTkFont(size=9),
+            text_color="#94a3b8",
+            justify="left",
+            wraplength=270
+        )
+        self.lbl_music_file_info.pack(anchor="w", padx=10, pady=(0, 4))
+
+        music_vol_row = ctk.CTkFrame(card_a2, fg_color="transparent")
+        music_vol_row.pack(fill="x", padx=10, pady=(4, 2))
+        ctk.CTkLabel(music_vol_row, text="Musik-Lautstärke:", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_music_vol_pct = ctk.CTkLabel(music_vol_row, text="100%", font=ctk.CTkFont(size=10, weight="bold"), text_color="#38bdf8")
+        self.lbl_music_vol_pct.pack(side="right")
+
+        self.slider_music_vol = ctk.CTkSlider(card_a2, from_=0.0, to=2.0, button_color="#0284c7", progress_color="#38bdf8", command=self._on_music_volume_change)
+        self.slider_music_vol.set(1.0)
+        self.slider_music_vol.pack(fill="x", padx=10, pady=(2, 6))
+
+        self.btn_remove_music = ctk.CTkButton(
+            card_a2,
+            text="🗑️ Musikspur entfernen",
+            font=ctk.CTkFont(size=10),
+            fg_color="#334155",
+            hover_color="#475569",
+            height=24,
+            command=self._remove_music_track
+        )
+        # only packed when music is loaded
 
         ctk.CTkButton(
             scroll_aud,
-            text="↩️ Audio zurücksetzen",
+            text="↩️ Audio & Musik zurücksetzen",
             font=ctk.CTkFont(size=10),
             fg_color="#1e242d",
             hover_color="#2b3442",
@@ -752,16 +832,17 @@ class LuxanixDesktopApp(ctk.CTk):
         header_col = ctk.CTkFrame(self.timeline_panel, fg_color="#10141a", width=68, corner_radius=0)
         header_col.grid(row=1, column=0, rowspan=2, sticky="nsew", padx=0, pady=0)
 
-        ctk.CTkLabel(header_col, text="SPUREN", font=ctk.CTkFont(size=9, weight="bold"), text_color="#64748b").pack(pady=4)
-        ctk.CTkLabel(header_col, text="🎬 V1\nVideo", font=ctk.CTkFont(size=10, weight="bold"), text_color="#00c4cc").pack(pady=10)
-        ctk.CTkLabel(header_col, text="⚡ FX\nShader", font=ctk.CTkFont(size=10, weight="bold"), text_color="#a855f7").pack(pady=6)
-        ctk.CTkLabel(header_col, text="🔊 A1\nAudio", font=ctk.CTkFont(size=10, weight="bold"), text_color="#10b981").pack(pady=8)
+        ctk.CTkLabel(header_col, text="SPUREN", font=ctk.CTkFont(size=9, weight="bold"), text_color="#64748b").pack(pady=(4, 2))
+        ctk.CTkLabel(header_col, text="🎬 V1\nVideo", font=ctk.CTkFont(size=9, weight="bold"), text_color="#00c4cc").pack(pady=4)
+        ctk.CTkLabel(header_col, text="⚡ FX\nShader", font=ctk.CTkFont(size=9, weight="bold"), text_color="#a855f7").pack(pady=4)
+        ctk.CTkLabel(header_col, text="🔊 A1\nAudio", font=ctk.CTkFont(size=9, weight="bold"), text_color="#10b981").pack(pady=4)
+        ctk.CTkLabel(header_col, text="🎵 A2\nMusik", font=ctk.CTkFont(size=9, weight="bold"), text_color="#38bdf8").pack(pady=4)
 
         self.canvas_timeline = ctk.CTkCanvas(
             self.timeline_panel,
             bg="#0b0e13",
             highlightthickness=0,
-            height=160
+            height=195
         )
         self.canvas_timeline.grid(row=1, column=1, rowspan=2, sticky="nsew", padx=0, pady=0)
         self.canvas_timeline.bind("<Configure>", lambda e: self._draw_timeline())
@@ -898,25 +979,61 @@ class LuxanixDesktopApp(ctk.CTk):
                 font=("Segoe UI", 8, "bold")
             )
 
-        # 4. Track 3: Audio Waveform
-        self.canvas_timeline.create_rectangle(0, 122, w, 152, fill="#11161d", outline="#1c2430")
+        # 4. Track 3: Audio Waveform (Spur A1 Video-Ton)
+        self.canvas_timeline.create_rectangle(0, 122, w, 150, fill="#11161d", outline="#1c2430")
         for seg in segments:
             seg_x1 = (seg["start"] / dur) * w
             seg_x2 = (seg["end"] / dur) * w
             self.canvas_timeline.create_rectangle(
-                seg_x1, 125, seg_x2, 149,
+                seg_x1, 125, seg_x2, 147,
                 fill="#12251d", outline="#10b981", width=1
             )
-            wave_pts = int((seg_x2 - seg_x1) / 5)
+            wave_pts = max(1, int((seg_x2 - seg_x1) / 5))
             for i in range(wave_pts):
                 wx = seg_x1 + i * 5
-                amp = np.sin((seg["start"] + i * 0.1) * 2.0) * 8 + np.cos(i * 0.8) * 4
+                amp = (np.sin((seg["start"] + i * 0.1) * 2.0) * 7 + np.cos(i * 0.8) * 3) * (0.0 if self.mute_video_audio else min(1.5, self.video_volume))
                 self.canvas_timeline.create_line(
-                    wx, 137 - abs(amp), wx, 137 + abs(amp),
-                    fill="#34d399", width=1.5
+                    wx, 136 - abs(amp), wx, 136 + abs(amp),
+                    fill="#34d399" if not self.mute_video_audio else "#64748b", width=1.5
                 )
 
-        # 5. Playhead Needle
+        # 5. Track 4: Background Music Waveform (Spur A2 Hintergrundmusik)
+        self.canvas_timeline.create_rectangle(0, 154, w, 184, fill="#11161d", outline="#1c2430")
+        if self.music_path and os.path.exists(self.music_path):
+            m_name = os.path.basename(self.music_path)
+            self.canvas_timeline.create_rectangle(
+                0, 157, w, 181,
+                fill="#0c2233", outline="#0284c7", width=1.5
+            )
+            self.canvas_timeline.create_text(
+                10, 169,
+                text=f"🎶 {m_name} (Spur A2: {int(self.music_volume * 100)}%)",
+                anchor="w",
+                fill="#38bdf8",
+                font=("Segoe UI", 8, "bold")
+            )
+            wave_pts = max(1, int(w / 6))
+            for i in range(wave_pts):
+                wx = i * 6
+                m_amp = (np.sin(i * 0.4) * 6 + np.cos(i * 0.2) * 3) * min(1.5, self.music_volume)
+                self.canvas_timeline.create_line(
+                    wx, 169 - abs(m_amp), wx, 169 + abs(m_amp),
+                    fill="#38bdf8", width=1.5
+                )
+        else:
+            self.canvas_timeline.create_rectangle(
+                0, 157, w, 181,
+                fill="#0d1117", outline="#1e293b", dash=(3, 3)
+            )
+            self.canvas_timeline.create_text(
+                10, 169,
+                text="➕ Hintergrundmusik-Spur (A2) — Klicke links auf 'Audio & Musik' zum Importieren",
+                anchor="w",
+                fill="#64748b",
+                font=("Segoe UI", 8)
+            )
+
+        # 6. Playhead Needle
         playhead_x = (self.current_time_sec / dur) * w
         self.canvas_timeline.create_line(playhead_x, 0, playhead_x, h, fill="#00e5ff", width=2)
         self.canvas_timeline.create_polygon(
@@ -1057,10 +1174,82 @@ class LuxanixDesktopApp(ctk.CTk):
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
 
+    def _on_video_volume_change(self, val):
+        self.video_volume = float(val)
+        if hasattr(self, "lbl_orig_vol_pct"):
+            self.lbl_orig_vol_pct.configure(text=f"{int(self.video_volume * 100)}%")
+        self._draw_timeline()
+
+    def _on_mute_change(self):
+        self.mute_video_audio = bool(self.sw_mute.get())
+        state_str = "stummgeschaltet" if self.mute_video_audio else "aktiv"
+        self.lbl_status.configure(text=f"Original-Audio Tonspur: {state_str}")
+        self._draw_timeline()
+
+    def _on_music_volume_change(self, val):
+        self.music_volume = float(val)
+        if hasattr(self, "lbl_music_vol_pct"):
+            self.lbl_music_vol_pct.configure(text=f"{int(self.music_volume * 100)}%")
+        self._draw_timeline()
+
+    def _choose_music_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Wähle eine Musikdatei für Spur A2",
+            filetypes=[
+                ("Audiodateien", "*.mp3 *.wav *.aac *.m4a *.ogg *.flac *.wma"),
+                ("MP3 Musik", "*.mp3"),
+                ("WAV Audio", "*.wav"),
+                ("AAC / M4A Audio", "*.aac *.m4a"),
+                ("Alle Dateien", "*.*")
+            ]
+        )
+        if not file_path:
+            return
+
+        self.music_path = file_path
+        file_name = os.path.basename(file_path)
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if hasattr(self, "lbl_music_file_info"):
+            self.lbl_music_file_info.configure(
+                text=f"🎶 {file_name}\nGröße: {file_size_mb:.2f} MB | Bereit für Timeline Spur A2",
+                text_color="#38bdf8"
+            )
+        if hasattr(self, "btn_remove_music"):
+            self.btn_remove_music.pack(fill="x", padx=10, pady=(2, 6))
+
+        self.lbl_status.configure(text=f"🎵 Hintergrundmusik '{file_name}' geladen und auf Spur A2 eingefügt.")
+        self._draw_timeline()
+
+    def _remove_music_track(self):
+        self.music_path = None
+        self.music_info = {}
+        if hasattr(self, "lbl_music_file_info"):
+            self.lbl_music_file_info.configure(
+                text="Keine Hintergrundmusik hinzugefügt.",
+                text_color="#94a3b8"
+            )
+        if hasattr(self, "btn_remove_music"):
+            self.btn_remove_music.pack_forget()
+        self.lbl_status.configure(text="🗑️ Musikspur entfernt.")
+        self._draw_timeline()
+
     def _reset_audio_settings(self):
         self.slider_vol.set(1.0)
+        self.video_volume = 1.0
+        if hasattr(self, "lbl_orig_vol_pct"):
+            self.lbl_orig_vol_pct.configure(text="100%")
         self.sw_mute.deselect()
-        self.lbl_status.configure(text="↩️ Audio-Einstellungen auf Standardwerte zurückgesetzt.")
+        self.mute_video_audio = False
+
+        if hasattr(self, "slider_music_vol"):
+            self.slider_music_vol.set(1.0)
+        self.music_volume = 1.0
+        if hasattr(self, "lbl_music_vol_pct"):
+            self.lbl_music_vol_pct.configure(text="100%")
+
+        self._remove_music_track()
+        self.lbl_status.configure(text="↩️ Audio- & Musik-Einstellungen auf Standardwerte zurückgesetzt.")
+        self._draw_timeline()
 
     def _reset_all(self):
         self._reset_cuts()
@@ -1432,10 +1621,16 @@ class LuxanixDesktopApp(ctk.CTk):
         else:
             out_res = "Original"
 
+        self.cancel_render_event.clear()
+
         # --- PHOTO EXPORT ---
         if getattr(self, "media_type", "video") == "image":
             self.is_rendering = True
             self.btn_export.configure(state="disabled", text="⏳ Rendert Bild...")
+            if hasattr(self, "btn_cancel_export"):
+                self.btn_cancel_export.pack(side="left", padx=(0, 6))
+                self.btn_cancel_export.configure(state="normal", text="🛑 Abbrechen")
+
             self.lbl_status.configure(text=f"⚡ Rendere Foto mit RTX Raytracing & Neural AI Super-Resolution ({out_res})...")
 
             output_dir = os.path.join(os.path.expanduser("~"), "Pictures", "Luxanix_Renders")
@@ -1450,7 +1645,8 @@ class LuxanixDesktopApp(ctk.CTk):
                 "realism_intensity": self.realism_intensity,
                 "neural_upscale": bool(self.sw_neural.get()),
                 "output_resolution": out_res,
-                "denoise": True
+                "denoise": True,
+                "cancel_event": self.cancel_render_event
             }
 
             def render_image_thread():
@@ -1460,9 +1656,12 @@ class LuxanixDesktopApp(ctk.CTk):
                     rendered_path = self.pipeline.process_image(
                         input_path=self.video_path,
                         output_path=out_file,
-                        params=img_params
+                        params=img_params,
+                        cancel_event=self.cancel_render_event
                     )
                     self.after(0, lambda: self._on_render_complete(rendered_path))
+                except InterruptedError:
+                    self.after(0, self._on_render_cancelled)
                 except Exception as e:
                     self.after(0, lambda err=str(e): self._on_render_error(err))
 
@@ -1473,6 +1672,9 @@ class LuxanixDesktopApp(ctk.CTk):
         self.is_rendering = True
         self.is_playing = False
         self.btn_export.configure(state="disabled", text="⏳ Rendert...")
+        if hasattr(self, "btn_cancel_export"):
+            self.btn_cancel_export.pack(side="left", padx=(0, 6))
+            self.btn_cancel_export.configure(state="normal", text="🛑 Abbrechen")
 
         output_dir = os.path.join(os.path.expanduser("~"), "Videos", "Luxanix_Renders")
         os.makedirs(output_dir, exist_ok=True)
@@ -1508,7 +1710,12 @@ class LuxanixDesktopApp(ctk.CTk):
             "trim_start": self.timeline_segments[0]["start"] if self.timeline_segments else 0.0,
             "trim_end": self.timeline_segments[-1]["end"] if self.timeline_segments else self.total_duration_sec,
             "nvenc_preset": nvenc_p,
-            "denoise": True
+            "denoise": True,
+            "music_path": self.music_path,
+            "music_volume": float(self.slider_music_vol.get()) if hasattr(self, "slider_music_vol") else 1.0,
+            "video_volume": float(self.slider_vol.get()) if hasattr(self, "slider_vol") else 1.0,
+            "mute_video_audio": bool(self.sw_mute.get()) if hasattr(self, "sw_mute") else False,
+            "cancel_event": self.cancel_render_event
         }
 
         def progress_cb(curr, total, fps, eta, elapsed):
@@ -1530,10 +1737,16 @@ class LuxanixDesktopApp(ctk.CTk):
                     input_path=self.video_path,
                     output_path=out_file,
                     params=params,
-                    progress_callback=progress_cb
+                    progress_callback=progress_cb,
+                    cancel_event=self.cancel_render_event
                 )
                 try:
                     self.after(0, lambda: self._on_render_complete(rendered_path))
+                except Exception:
+                    pass
+            except InterruptedError:
+                try:
+                    self.after(0, self._on_render_cancelled)
                 except Exception:
                     pass
             except Exception as e:
@@ -1544,6 +1757,27 @@ class LuxanixDesktopApp(ctk.CTk):
 
         threading.Thread(target=render_thread, daemon=True).start()
 
+    def _cancel_render(self):
+        """Signals the running export thread to abort immediately."""
+        if self.is_rendering:
+            self.cancel_render_event.set()
+            if hasattr(self, "btn_cancel_export"):
+                self.btn_cancel_export.configure(state="disabled", text="⏳ Bricht ab...")
+            self.lbl_status.configure(text="🛑 Breche Export ab... Bitte warten...")
+
+    def _on_render_cancelled(self):
+        """Clean UI restoration after export cancellation."""
+        self.is_rendering = False
+        if hasattr(self, "btn_cancel_export"):
+            self.btn_cancel_export.pack_forget()
+            self.btn_cancel_export.configure(state="normal", text="🛑 Abbrechen")
+        btn_txt = "🚀 Bild exportieren" if getattr(self, "media_type", "video") == "image" else "🚀 Exportieren"
+        self.btn_export.configure(state="normal", text=btn_txt)
+        self.progress_bar.set(0.0)
+        self.lbl_status.configure(text="🛑 Export wurde erfolgreich abgebrochen. System bereit.")
+        self.lbl_eta.configure(text="ABGEBROCHEN")
+        messagebox.showinfo("Export abgebrochen", "Der Render-Vorgang wurde erfolgreich abgebrochen und temporäre Dateien bereinigt.")
+
     def _update_render_ui(self, prog, pct, curr, total, fps, m_eta, s_eta, m_el, s_el):
         self.progress_bar.set(prog)
         self.lbl_status.configure(
@@ -1553,6 +1787,8 @@ class LuxanixDesktopApp(ctk.CTk):
 
     def _on_render_complete(self, output_path):
         self.is_rendering = False
+        if hasattr(self, "btn_cancel_export"):
+            self.btn_cancel_export.pack_forget()
         self.progress_bar.set(1.0)
         btn_txt = "🚀 Bild exportieren" if getattr(self, "media_type", "video") == "image" else "🚀 Exportieren"
         self.btn_export.configure(state="normal", text=btn_txt)
@@ -1569,6 +1805,8 @@ class LuxanixDesktopApp(ctk.CTk):
 
     def _on_render_error(self, err_msg):
         self.is_rendering = False
+        if hasattr(self, "btn_cancel_export"):
+            self.btn_cancel_export.pack_forget()
         btn_txt = "🚀 Bild exportieren" if getattr(self, "media_type", "video") == "image" else "🚀 Exportieren"
         self.btn_export.configure(state="normal", text=btn_txt)
         self.lbl_status.configure(text=f"Fehler: {err_msg}")

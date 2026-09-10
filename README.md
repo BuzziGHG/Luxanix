@@ -115,6 +115,25 @@ Dank moderner Low-Level-Optimierungen rendert Luxanix Studio nun mehr als doppel
 
 ---
 
+## 🛑 Sofortiger 1-Klick Export-Abbruch
+
+Nie wieder warten müssen, wenn man sich bei einer Auflösung oder einem Schnitt vertan hat:
+- **Sofortiger Abbruch-Button:** Sobald ein Video- oder Foto-Export startet, erscheint im Header und in der Statusleiste ein rot hervorgehobener `[ 🛑 Abbrechen ]`-Button.
+- **Saubere Terminierung:** Der laufende Hardware-Encoder-Stream wird sofort gestoppt und alle temporären Zwischendateien werden rückstandsfrei gelöscht.
+- **Kein Hängenbleiben:** Die App kehrt ohne Neustart oder Absturz in den normalen Bearbeitungsmodus zurück.
+
+---
+
+## 🎵 Multi-Track Audio & Musikspur (Spuren A1 & A2)
+
+Professionelle Audio-Mischung direkt wie in CapCut Desktop:
+- **Spur A1 (Originalton):** Lautstärkeregler (0% bis 200%) und Mute-Schalter zum Stummschalten des Originalvideos.
+- **Spur A2 (Hintergrundmusik):** Importiere beliebige Musikdateien (`.mp3`, `.wav`, `.aac`, `.m4a`, `.ogg`, `.flac`).
+- **Visuelle Timeline-Wellenform:** Die Musikspur wird direkt unter der Videotonspur als interaktives Band mit Pegelvisualisierung dargestellt.
+- **Automatisches FFmpeg-Audiomixing:** Im finalen Export werden Video-Audio und Hintergrundmusik mit Sample-Genauigkeit, Lautstärke-Gewichtung und exakter Clip-Länge hardwarenah abgemischt.
+
+---
+
 ## 🚀 1-Klick GitHub Upload
 
 Um den lokalen Code und Updates direkt auf dein GitHub-Repository hochzuladen:
