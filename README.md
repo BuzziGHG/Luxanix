@@ -6,9 +6,8 @@
 [![PyTorch CUDA](https://img.shields.io/badge/PyTorch-CUDA%2012.4-EE4C2C.svg?logo=pytorch)](https://pytorch.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Verwandle normale Gaming- und Simracing-Videoaufnahmen in photorealistische Meisterwerke mit echtem Screen-Space Raytracing (RTGI, SSR, RTAO), KI-Tiefenrekonstruktion, Video-Schnittfunktion, Detail-Clarity und kinoreifem Color-Grading.**
-> 
-> 👉 **[Klicke hier, um die neueste `Luxanix.exe` herunterzuladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
+> 👉 **[Klicke hier für das neueste Release: `Luxanix.exe` (GitHub Releases)](https://github.com/BuzziGHG/Luxanix/releases/latest)**
+> 💾 **[Direkt-Download: `Luxanix.exe` (Sofort-Download)](https://github.com/BuzziGHG/Luxanix/raw/main/Luxanix.exe)**
 
 ---
 
