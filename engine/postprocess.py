@@ -149,8 +149,9 @@ class ColorGrader:
         vibrance: float,
     ) -> torch.Tensor:
         """
-        Adjusts saturation and smart vibrance.
-        Selectively lifts muted colors while protecting already saturated tones.
+        Adjusts saturation and smart vibrance with chroma preservation.
+        Pops racing car liveries, brake calipers, sponsor decals, and environmental colors
+        without burning out highlight details.
         """
         weights = torch.tensor([0.2126, 0.7152, 0.0722], device=self.device, dtype=rgb.dtype).view(1, 3, 1, 1)
         luma = (rgb * weights).sum(dim=1, keepdim=True)
@@ -159,7 +160,8 @@ class ColorGrader:
         min_c, _ = torch.min(rgb, dim=1, keepdim=True)
         sat_metric = (max_c - min_c) / (max_c + 1e-5)
 
-        vibrance_factor = 1.0 + vibrance * (1.0 - sat_metric)
+        # Smart vibrance: lifts muted/flat gaming tones while protecting already vivid colors
+        vibrance_factor = 1.0 + vibrance * (1.0 - sat_metric * 0.7)
         total_sat = saturation * vibrance_factor
 
         adjusted = luma + (rgb - luma) * total_sat
@@ -218,14 +220,40 @@ class ColorGrader:
 
     def _apply_clarity(self, rgb: torch.Tensor, clarity: float) -> torch.Tensor:
         """
-        Enhances edge crispness and micro-contrast using fast unsharp masking.
-        Effectively removes TAA (temporal anti-aliasing) motion blur in racing games.
+        GPU Contrast-Adaptive Sharpening (CAS) & Texture Edge Enhancer.
+        Specially optimized for racing liveries, sponsor lettering (Pirelli, Shell, etc.),
+        windshield banners, carbon weave, and asphalt micro-detail.
+        Eliminates temporal anti-aliasing (TAA) and motion blur without edge halos.
         """
-        kernel = (torch.tensor([[1, 2, 1], [2, 4, 2], [1, 2, 1]], device=self.device, dtype=rgb.dtype) / 16.0)
-        kernel = kernel.repeat(3, 1, 1, 1)
-        blurred = F.conv2d(rgb, kernel, padding=1, groups=3)
-        high_pass = rgb - blurred
-        return torch.clamp(rgb + high_pass * clarity, min=0.0)
+        if clarity <= 0.005:
+            return rgb
+
+        padded = F.pad(rgb, (1, 1, 1, 1), mode="reflect")
+        c = padded[:, :, 1:-1, 1:-1]   # Center
+        t = padded[:, :, 0:-2, 1:-1]   # Top
+        b = padded[:, :, 2:,   1:-1]   # Bottom
+        l = padded[:, :, 1:-1, 0:-2]   # Left
+        r = padded[:, :, 1:-1, 2:]     # Right
+
+        # Cross neighbor extrema for contrast adaptation
+        cross_min = torch.min(torch.min(torch.min(t, b), torch.min(l, r)), c)
+        cross_max = torch.max(torch.max(torch.max(t, b), torch.max(l, r)), c)
+
+        # Contrast-adaptive weight calculation: sharpens strong decal edges without ringing
+        amp = torch.sqrt(torch.clamp(torch.min(cross_min, 2.0 - cross_max) / (cross_max + 1e-4), min=0.0, max=1.0))
+        w = -amp * (clarity * 0.25)
+
+        # High-precision CAS filter
+        sharp = (c + w * (t + b + l + r)) / (1.0 + 4.0 * w)
+
+        # Edge-gated decal & lettering micro-boost
+        edge_contrast = cross_max - cross_min
+        text_mask = torch.clamp(edge_contrast * 2.5, 0.0, 1.0)
+        unsharp_kernel = (torch.tensor([[0, 1, 0], [1, 4, 1], [0, 1, 0]], device=self.device, dtype=rgb.dtype) / 8.0).repeat(3, 1, 1, 1)
+        blurred = F.conv2d(rgb, unsharp_kernel, padding=1, groups=3)
+        text_boost = (rgb - blurred) * (clarity * 0.35) * text_mask
+
+        return torch.clamp(sharp + text_boost, min=0.0, max=1.0)
 
     def _apply_film_grain(self, rgb: torch.Tensor, amount: float) -> torch.Tensor:
         """

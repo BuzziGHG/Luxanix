@@ -246,6 +246,8 @@ class VideoPipeline:
                 params["exposure"] = params.get("exposure", 0.0) + float(params["manual_exp"])
             if "manual_grain" in params:
                 params["film_grain"] = float(params["manual_grain"])
+            if "manual_sharpness" in params:
+                params["clarity"] = params.get("clarity", 0.75) * float(params["manual_sharpness"])
 
         # ---------------------------------------------------------------
         # FAST PREVIEW PATH — GPU-accelerated real-time RTX preview

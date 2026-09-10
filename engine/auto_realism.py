@@ -151,18 +151,19 @@ class AutonomousRealismEngine:
         }.get(scene, 0.0)
         base_temp = float(np.clip(wb_correction + scene_temp_bias, -0.30, 0.30))
 
-        # Auto Saturation & Vibrance (Noticeable livery pop!)
-        # Flat gaming footage typically has muted colors (~0.15 - 0.22 sat).
-        # We boost saturation by 18-25% at 1.0 so liveries and scenery pop naturally!
+        # Auto Saturation & Vibrance (Rich, vibrant racing liveries!)
+        # Gaming footage often suffers from dull, desaturated flat color palettes.
+        # We boost saturation & smart vibrance significantly so sponsor decals, paint jobs,
+        # brake calipers, curbs, and environments look rich, vibrant, and broadcast-grade.
         if mean_sat < 0.15:
-            base_sat_offset = 0.24
-            base_vib = 0.22
+            base_sat_offset = 0.36
+            base_vib = 0.32
         elif mean_sat < 0.25:
+            base_sat_offset = 0.28
+            base_vib = 0.26
+        else:
             base_sat_offset = 0.16
             base_vib = 0.15
-        else:
-            base_sat_offset = 0.08
-            base_vib = 0.08
 
         # SSR (Screen-Space Reflections on wet asphalt and car paint)
         wetness_score = float(np.clip(road_highlights * 4.5 + road_std * 1.5, 0.10, 0.90))
@@ -177,8 +178,8 @@ class AutonomousRealismEngine:
         # Bloom (Headlights & specular highlights)
         base_bloom = float(np.clip(0.10 + highlights * 1.4, 0.08, 0.30))
 
-        # Detail Clarity (Anti-TAA sharpening)
-        base_clarity = 0.20
+        # Detail Clarity (GPU Contrast-Adaptive Sharpening for razor-sharp logos & text)
+        base_clarity = 0.75
 
         # Lens Vignette
         base_vignette = 0.15

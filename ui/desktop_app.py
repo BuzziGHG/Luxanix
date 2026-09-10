@@ -505,12 +505,22 @@ class LuxanixDesktopApp(ctk.CTk):
         # Sättigung (0.0 = Schwarz-Weiß, 1.0 = Normal/Auto, 2.5 = Hyper-Saturiert)
         row_sat = ctk.CTkFrame(scroll_col, fg_color="transparent")
         row_sat.pack(fill="x", padx=4, pady=(3, 1))
-        ctk.CTkLabel(row_sat, text="Sättigung", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        ctk.CTkLabel(row_sat, text="Sättigung (Farben & Liveries)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
         self.lbl_sat_val = ctk.CTkLabel(row_sat, text="1.00×", font=ctk.CTkFont(size=10), text_color="#00c4cc")
         self.lbl_sat_val.pack(side="right")
         self.slider_sat = ctk.CTkSlider(scroll_col, from_=0.0, to=2.5, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
         self.slider_sat.set(1.0)
         self.slider_sat.pack(fill="x", padx=4, pady=(1, 5))
+
+        # Schärfe & Textur-Detail (GPU Contrast-Adaptive Sharpening für Schriftzüge, Sponsorenlogos & Kanten)
+        row_shp = ctk.CTkFrame(scroll_col, fg_color="transparent")
+        row_shp.pack(fill="x", padx=4, pady=(3, 1))
+        ctk.CTkLabel(row_shp, text="Schärfe (Schriftzüge & Logos)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_sharp_val = ctk.CTkLabel(row_shp, text="1.00× (Adaptiv)", font=ctk.CTkFont(size=10), text_color="#00c4cc")
+        self.lbl_sharp_val.pack(side="right")
+        self.slider_sharpness = ctk.CTkSlider(scroll_col, from_=0.0, to=2.5, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        self.slider_sharpness.set(1.0)
+        self.slider_sharpness.pack(fill="x", padx=4, pady=(1, 5))
 
         # Kontrast (0.5 = flach, 1.0 = Standard, 1.8 = stark)
         row_con = ctk.CTkFrame(scroll_col, fg_color="transparent")
@@ -1233,12 +1243,14 @@ class LuxanixDesktopApp(ctk.CTk):
 
     def _reset_color_settings(self):
         if hasattr(self, "slider_sat"): self.slider_sat.set(1.0)
+        if hasattr(self, "slider_sharpness"): self.slider_sharpness.set(1.0)
         if hasattr(self, "slider_contrast"): self.slider_contrast.set(1.0)
         if hasattr(self, "slider_temp"): self.slider_temp.set(0.0)
         if hasattr(self, "slider_exp"): self.slider_exp.set(0.0)
         if hasattr(self, "slider_grain"): self.slider_grain.set(0.0)
 
         if hasattr(self, "lbl_sat_val"): self.lbl_sat_val.configure(text="1.00×")
+        if hasattr(self, "lbl_sharp_val"): self.lbl_sharp_val.configure(text="1.00× (Adaptiv)")
         if hasattr(self, "lbl_con_val"): self.lbl_con_val.configure(text="1.00×")
         if hasattr(self, "lbl_tmp_val"): self.lbl_tmp_val.configure(text="0.00")
         if hasattr(self, "lbl_exp_val"): self.lbl_exp_val.configure(text="0.00 EV")
@@ -1439,10 +1451,11 @@ class LuxanixDesktopApp(ctk.CTk):
 
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-            # Fast preview resolution — 720p gives excellent quality with fast color-grading path
-            ph = 720
+            # High-definition playback resolution — 900p preserves crisp decals & sponsor logos with high FPS on RTX GPUs
+            ph = min(frame_rgb.shape[0], 900)
             pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
-            small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
+            pw = pw - (pw % 2)
+            small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA) if ph != frame_rgb.shape[0] else frame_rgb
 
             # Master Slider 0.0 = Raw Original
             if self.realism_intensity <= 0.04:
@@ -1511,6 +1524,9 @@ class LuxanixDesktopApp(ctk.CTk):
         if hasattr(self, "slider_sat"):
             manual_sat = float(self.slider_sat.get())
             params["saturation"] = params.get("saturation", 1.0) * manual_sat
+        if hasattr(self, "slider_sharpness"):
+            manual_sharp = float(self.slider_sharpness.get())
+            params["clarity"] = params.get("clarity", 0.75) * manual_sharp
         if hasattr(self, "slider_contrast"):
             manual_contrast = float(self.slider_contrast.get())
             params["contrast"] = params.get("contrast", 1.0) * manual_contrast
@@ -1609,9 +1625,11 @@ class LuxanixDesktopApp(ctk.CTk):
                 if not ret: return
                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-            ph = 540
+            # High-definition still preview — renders up to full 1080p with Lanczos4 for crystal-clear decals & text
+            ph = min(frame_rgb.shape[0], 1080)
             pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
-            small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
+            pw = pw - (pw % 2)
+            small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_LANCZOS4) if ph != frame_rgb.shape[0] else frame_rgb
 
             # Master Slider 0.0 = Raw Original
             if self.realism_intensity <= 0.04:
@@ -1701,6 +1719,10 @@ class LuxanixDesktopApp(ctk.CTk):
         # Update labels next to sliders
         if hasattr(self, "lbl_sat_val") and hasattr(self, "slider_sat"):
             self.lbl_sat_val.configure(text=f"{float(self.slider_sat.get()):.2f}×")
+        if hasattr(self, "lbl_sharp_val") and hasattr(self, "slider_sharpness"):
+            sh = float(self.slider_sharpness.get())
+            mode_desc = " (Weich)" if sh < 0.6 else (" (Adaptiv)" if sh <= 1.3 else " (Ultra-Scharf)")
+            self.lbl_sharp_val.configure(text=f"{sh:.2f}×{mode_desc}")
         if hasattr(self, "lbl_con_val") and hasattr(self, "slider_contrast"):
             self.lbl_con_val.configure(text=f"{float(self.slider_contrast.get()):.2f}×")
         if hasattr(self, "lbl_tmp_val") and hasattr(self, "slider_temp"):
@@ -1850,6 +1872,7 @@ class LuxanixDesktopApp(ctk.CTk):
                 "auto_realism": True,
                 "realism_intensity": self.realism_intensity,
                 "manual_sat": float(self.slider_sat.get()) if hasattr(self, "slider_sat") else 1.0,
+                "manual_sharpness": float(self.slider_sharpness.get()) if hasattr(self, "slider_sharpness") else 1.0,
                 "manual_contrast": float(self.slider_contrast.get()) if hasattr(self, "slider_contrast") else 1.0,
                 "manual_temp": float(self.slider_temp.get()) if hasattr(self, "slider_temp") else 0.0,
                 "manual_exp": float(self.slider_exp.get()) if hasattr(self, "slider_exp") else 0.0,
@@ -1914,6 +1937,7 @@ class LuxanixDesktopApp(ctk.CTk):
             "auto_realism": True,
             "realism_intensity": self.realism_intensity,
             "manual_sat": float(self.slider_sat.get()) if hasattr(self, "slider_sat") else 1.0,
+            "manual_sharpness": float(self.slider_sharpness.get()) if hasattr(self, "slider_sharpness") else 1.0,
             "manual_contrast": float(self.slider_contrast.get()) if hasattr(self, "slider_contrast") else 1.0,
             "manual_temp": float(self.slider_temp.get()) if hasattr(self, "slider_temp") else 0.0,
             "manual_exp": float(self.slider_exp.get()) if hasattr(self, "slider_exp") else 0.0,
