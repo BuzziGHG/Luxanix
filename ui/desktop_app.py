@@ -43,6 +43,13 @@ class LuxanixDesktopApp(ctk.CTk):
         self.geometry("1420x920")
         self.minsize(1180, 780)
 
+        icon_path = os.path.join(PROJECT_ROOT, "assets", "icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.iconbitmap(icon_path)
+            except Exception:
+                pass
+
         # State Variables
         self.video_path = None
         self.video_info = {}
@@ -104,8 +111,8 @@ class LuxanixDesktopApp(ctk.CTk):
         lbl_sub.pack(anchor="w", padx=16, pady=(0, 10))
 
         # GPU Badge
-        gpu_name = self.gpu_info.get("device_name", "NVIDIA GeForce RTX")
-        vram_gb = self.gpu_info.get("vram_gb", 12.0)
+        gpu_name = getattr(self.gpu_info, "device_name", None) or (self.gpu_info.get("device_name", "NVIDIA GeForce RTX") if isinstance(self.gpu_info, dict) else "NVIDIA GeForce RTX")
+        vram_gb = getattr(self.gpu_info, "vram_gb", None) or (self.gpu_info.get("vram_gb", 12.0) if isinstance(self.gpu_info, dict) else 12.0)
         self.lbl_gpu = ctk.CTkLabel(
             self.sidebar,
             text=f"🟢 {gpu_name} ({vram_gb:.1f} GB VRAM)",
@@ -194,7 +201,7 @@ class LuxanixDesktopApp(ctk.CTk):
         self.lbl_auto_desc = ctk.CTkLabel(
             sec_auto,
             text="Analysiert Szenen dynamisch & berechnet optimales RTGI, Nässe-Reflexionen & Belichtung.",
-            font=ctk.CTkFont(size=10.5),
+            font=ctk.CTkFont(size=11),
             text_color="#86efac",
             justify="left",
             wraplength=340
@@ -408,7 +415,7 @@ class LuxanixDesktopApp(ctk.CTk):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill="x", padx=12, pady=2)
 
-        lbl = ctk.CTkLabel(frame, text=f"{label_text}: {default_val:.2f}", font=ctk.CTkFont(size=10.5), text_color="#cbd5e1")
+        lbl = ctk.CTkLabel(frame, text=f"{label_text}: {default_val:.2f}", font=ctk.CTkFont(size=11), text_color="#cbd5e1")
         lbl.pack(anchor="w")
 
         slider = ctk.CTkSlider(frame, from_=min_val, to=max_val, number_of_steps=100)

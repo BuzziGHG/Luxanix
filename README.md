@@ -47,8 +47,11 @@ Luxanix Studio erkennt deine Grafikkarte automatisch und wählt das passende Spe
 ## 🚀 Schnellstart (Windows)
 
 1. Lade dir die neueste **[`Luxanix.exe`](https://github.com/BuzziGHG/Luxanix/releases/latest)** herunter.
-2. Mache einen **Doppelklick auf `Luxanix.exe`**.
-3. Das Programm startet direkt als eigenständige, native Windows Desktop-Applikation (kein Browser nötig).
+2. Mache einen **Doppelklick auf `Luxanix.exe`**:
+   - **Vollautomatische Festinstallation:** Das Tool installiert sich beim ersten Klick automatisch dauerhaft auf deinem PC (`AppData\Local\Programs\Luxanix`).
+   - **Desktop- & Startmenü-Verknüpfung:** Es wird automatisch ein Desktop-Icon sowie ein Startmenü-Eintrag erstellt.
+   - Du musst nie wieder nach der heruntergeladenen Datei im Download-Ordner suchen – drücke einfach die **Windows-Taste**, tippe **`Luxanix`** und drücke Enter!
+3. Das Programm startet direkt als eigenständige, native Windows Desktop-Applikation mit NVIDIA RTX Beschleunigung.
 4. Video auswählen, Auto-Preset aktivieren und die Remaster-Vorschau direkt im integrierten Player ansehen!
 
 ---
