@@ -23,8 +23,9 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Compile Native Luxanix.exe
+        shell: cmd
         run: |
-          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+ /platform:x64 /out:Luxanix.exe /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll src-launcher/Program.cs
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+ /platform:x64 /out:Luxanix.exe /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll "%CD%\src-launcher\Program.cs"
 
       - name: Package Release ZIP
         run: |
