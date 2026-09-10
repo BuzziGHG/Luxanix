@@ -1,12 +1,14 @@
 """
-Photorealistic Post-Processing and Color Grading for SimRTX Studio.
+Photorealistic Post-Processing and Color Grading for Luxanix Studio Pro.
 Features:
-- Composite Ray Traced buffers (Base + AO + RTGI + SSR)
-- Saturation and Smart Vibrance
-- Exposure, Contrast, and Black Level
-- Color Temperature & Tint
-- Physically-based Multi-Scale Bloom
-- ACES Filmic Tone Mapping
+- Composite Ray Traced buffers (Base + AO + RTGI + SSR) with natural physical blending
+- Specular highlight preservation (smooth shoulder compression without darkening base image)
+- High-fidelity Saturation and Smart Vibrance
+- Precise Exposure, Contrast, and Black Level retention (no washed-out blacks)
+- Color Temperature & Tint (Kelvin shifting)
+- Multi-Scale RTX Bloom for headlights, sun rays & wet road speculars
+- Crisp Anti-TAA Texture Clarity (removes game blur)
+- Clean broadcast-grade output (no digital noise/film grain artifacts)
 """
 
 import math
@@ -26,113 +28,119 @@ class ColorGrader:
         params: Dict[str, Any],
     ) -> torch.Tensor:
         """
-        Full autonomous color science pipeline:
-          RTX Composite → Exposure → Contrast → Shadow Lift → Highlight Rolloff
-          → Auto White Balance (Temperature) → Auto Saturation → Vibrance
-          → Bloom → Tone Mapping → Vignette → Clarity → Film Grain
+        Full autonomous color science and raytracing compositing pipeline:
+          RTX Composite (RTAO + RTGI + SSR)
+          → Exposure EV
+          → Cinematic Contrast S-Curve
+          → Color Temperature (Kelvin / Auto White Balance)
+          → Auto Saturation & Smart Vibrance
+          → Multi-scale Bloom (Headlights & Speculars)
+          → Soft Shoulder Highlight Compression
+          → Subtle Cinematic Lens Vignette
+          → Detail Clarity (Anti-TAA Sharpening)
         """
         ao = rt_buffers.get("rtao", torch.ones_like(base_color[:, :1]))
         rtgi = rt_buffers.get("rtgi", torch.zeros_like(base_color))
         ssr = rt_buffers.get("ssr", torch.zeros_like(base_color))
 
-        # 1. Physically-Based Composite (atmosphere-preserving)
-        ao_clamped = torch.clamp(ao, min=0.85, max=1.0)
+        # -------------------------------------------------------------
+        # 1. Physically-Based Composite (Grounded & Natural)
+        # -------------------------------------------------------------
+        # RTAO: grounds the car chassis and tires onto the tarmac with deep contact shadows.
+        # Clamped to [0.45, 1.0] to prevent unnatural black voids while providing rich depth.
+        ao_clamped = torch.clamp(ao, min=0.45, max=1.0)
         composited = base_color * ao_clamped
-        rtgi_weight = params.get("rtgi_intensity", 0.25)
-        ssr_weight  = params.get("ssr_intensity",  0.15)
-        composited = composited + rtgi * rtgi_weight * 0.4 + ssr * ssr_weight * 0.4
 
-        # 2. Exposure (EV stops)
+        # Additive Ray-Traced Global Illumination & Reflections
+        rtgi_weight = params.get("rtgi_intensity", 0.35)
+        ssr_weight  = params.get("ssr_intensity",  0.40)
+        if rtgi_weight > 0.0:
+            composited = composited + rtgi * rtgi_weight
+        if ssr_weight > 0.0:
+            composited = composited + ssr * ssr_weight
+
+        # -------------------------------------------------------------
+        # 2. Exposure Adjustment (in EV stops: 2^ev)
+        # -------------------------------------------------------------
         exposure = params.get("exposure", 0.0)
-        if exposure != 0.0:
+        if abs(exposure) > 0.001:
             composited = composited * (2.0 ** exposure)
 
-        # 3. Contrast S-Curve (around 0.18 middle-grey)
+        # -------------------------------------------------------------
+        # 3. Contrast S-Curve (Pivoted around 0.18 middle-grey)
+        # -------------------------------------------------------------
         contrast = params.get("contrast", 1.0)
-        if contrast != 1.0:
+        if abs(contrast - 1.0) > 0.005:
             composited = torch.clamp((composited - 0.18) * contrast + 0.18, min=0.0)
 
-        # 4. Shadow Lift — raises black point gently for cinematic detail recovery
-        shadow_lift = params.get("shadow_lift", 0.0)
-        if shadow_lift > 0.0:
-            composited = self._apply_shadow_lift(composited, shadow_lift)
-
-        # 5. Highlight Rolloff — soft shoulder on blown highlights / speculars
-        highlight_rolloff = params.get("highlight_rolloff", 0.0)
-        if highlight_rolloff > 0.0:
-            composited = self._apply_highlight_rolloff(composited, highlight_rolloff)
-
-        # 6. Color Temperature (auto white balance / Kelvin shift)
+        # -------------------------------------------------------------
+        # 4. Color Temperature (Auto White Balance / Kelvin Shift)
+        # -------------------------------------------------------------
         temp = params.get("temperature", 0.0)  # -1.0 cool/blue … +1.0 warm/orange
         if abs(temp) > 0.005:
-            r_scale = 1.0 + temp * 0.15
-            b_scale = 1.0 - temp * 0.15
+            r_scale = 1.0 + temp * 0.14
+            b_scale = 1.0 - temp * 0.14
             color_weights = torch.tensor(
                 [r_scale, 1.0, b_scale], device=self.device, dtype=composited.dtype
             ).view(1, 3, 1, 1)
             composited = composited * color_weights
 
-        # 7. Auto Saturation & Smart Vibrance
+        # -------------------------------------------------------------
+        # 5. Saturation & Smart Vibrance (Pops racing liveries & decals)
+        # -------------------------------------------------------------
         saturation = params.get("saturation", 1.0)
         vibrance   = params.get("vibrance", 0.0)
-        if saturation != 1.0 or vibrance != 0.0:
+        if abs(saturation - 1.0) > 0.005 or abs(vibrance) > 0.005:
             composited = self._apply_saturation_vibrance(composited, saturation, vibrance)
 
-        # 8. Bloom (RTX headlight & sun glow)
-        bloom_intensity = params.get("bloom_intensity", 0.10)
-        bloom_threshold = params.get("bloom_threshold", 0.85)
-        if bloom_intensity > 0.0:
+        # -------------------------------------------------------------
+        # 6. Multi-Scale Bloom (RTX Glow on headlights, taillights & speculars)
+        # -------------------------------------------------------------
+        bloom_intensity = params.get("bloom_intensity", 0.0)
+        bloom_threshold = params.get("bloom_threshold", 0.88)
+        if bloom_intensity > 0.01:
             composited = self._apply_bloom(composited, bloom_intensity, bloom_threshold)
 
-        # 9. Tone Mapping (Soft Reinhard default — preserves cinematic darks)
+        # -------------------------------------------------------------
+        # 7. Soft Shoulder Highlight Rolloff (Preserves 100% Base Dynamic Range)
+        # -------------------------------------------------------------
+        # Unlike old Reinhard which compressed 1.0 to 0.66 and washed out the image,
+        # this only compresses highlights above 0.85 that exceeded 1.0 from additive RTX.
         use_aces = params.get("use_aces", False)
         if use_aces:
             composited = self._aces_tonemap(composited)
         else:
-            composited = composited / (composited + 0.5)
-            composited = torch.clamp(composited * 1.04, 0.0, 1.0)
+            # Soft shoulder: pixels <= 0.85 are 100% untouched
+            threshold = 0.85
+            over = torch.clamp(composited - threshold, min=0.0)
+            composited = torch.where(
+                composited > threshold,
+                threshold + over / (1.0 + over * 1.8),
+                composited
+            )
 
-        # 10. Cinematic Lens Vignette
+        # -------------------------------------------------------------
+        # 8. Subtle Lens Vignette (Cinematic Edge Framing)
+        # -------------------------------------------------------------
         vignette_amount = params.get("vignette", 0.0)
-        if vignette_amount > 0.0:
+        if vignette_amount > 0.01:
             composited = self._apply_vignette(composited, vignette_amount)
 
-        # 11. Detail Clarity / TAA Sharpening
-        clarity = params.get("clarity", 0.3)
-        if clarity > 0.0:
+        # -------------------------------------------------------------
+        # 9. Detail Clarity / Anti-TAA Texture Sharpening
+        # -------------------------------------------------------------
+        clarity = params.get("clarity", 0.0)
+        if clarity > 0.01:
             composited = self._apply_clarity(composited, clarity)
 
-        # 12. Adaptive Film Grain
+        # -------------------------------------------------------------
+        # 10. Film Grain (Disabled by default — clean broadcast quality)
+        # -------------------------------------------------------------
         film_grain = params.get("film_grain", 0.0)
-        if film_grain > 0.0:
+        if film_grain > 0.005:
             composited = self._apply_film_grain(composited, film_grain)
 
         return torch.clamp(composited, 0.0, 1.0)
-
-    def _apply_shadow_lift(self, rgb: torch.Tensor, lift: float) -> torch.Tensor:
-        """
-        Gently raises the black point for cinematic shadow detail recovery.
-        Uses a toe curve: only affects the dark quarter of the tonal range.
-        lift: 0.0 = no change, 0.05 = professional grade lift
-        """
-        # Shadows are values below 0.20 — apply a smooth lift only there
-        shadow_mask = torch.clamp(1.0 - rgb / 0.20, min=0.0, max=1.0)
-        return rgb + shadow_mask * lift
-
-    def _apply_highlight_rolloff(self, rgb: torch.Tensor, rolloff: float) -> torch.Tensor:
-        """
-        Soft-clips bright highlights above 0.75 to prevent harsh clipping of speculars.
-        Uses a smooth S-shaped shoulder: highlights are compressed, not clipped hard.
-        rolloff: 0.0 = no rolloff, 1.0 = strong compression
-        """
-        # Only compress above the shoulder threshold
-        threshold = 0.75
-        weights = torch.tensor([0.2126, 0.7152, 0.0722], device=self.device, dtype=rgb.dtype).view(1, 3, 1, 1)
-        luma = (rgb * weights).sum(dim=1, keepdim=True)
-        hi_mask = torch.clamp((luma - threshold) / (1.0 - threshold + 1e-5), min=0.0, max=1.0)
-        # Compress highlights: blend toward 1.0 softly
-        compressed = rgb - hi_mask * (rgb - 1.0) * rolloff * 0.3
-        return torch.clamp(compressed, 0.0, 1.0)
 
     def _apply_saturation_vibrance(
         self,
@@ -142,21 +150,18 @@ class ColorGrader:
     ) -> torch.Tensor:
         """
         Adjusts saturation and smart vibrance.
+        Selectively lifts muted colors while protecting already saturated tones.
         """
-        # Rec. 709 Luminance
         weights = torch.tensor([0.2126, 0.7152, 0.0722], device=self.device, dtype=rgb.dtype).view(1, 3, 1, 1)
         luma = (rgb * weights).sum(dim=1, keepdim=True)
 
-        # Per-pixel max/min channel difference (saturation metric)
         max_c, _ = torch.max(rgb, dim=1, keepdim=True)
         min_c, _ = torch.min(rgb, dim=1, keepdim=True)
         sat_metric = (max_c - min_c) / (max_c + 1e-5)
 
-        # Vibrance scales muted colors more than saturated colors
         vibrance_factor = 1.0 + vibrance * (1.0 - sat_metric)
         total_sat = saturation * vibrance_factor
 
-        # Linear blend between luminance and color
         adjusted = luma + (rgb - luma) * total_sat
         return torch.clamp(adjusted, min=0.0)
 
@@ -173,7 +178,6 @@ class ColorGrader:
         weights = torch.tensor([0.2126, 0.7152, 0.0722], device=self.device, dtype=rgb.dtype).view(1, 3, 1, 1)
         luma = (rgb * weights).sum(dim=1, keepdim=True)
 
-        # Extract highlight areas exceeding threshold
         bright_mask = torch.clamp((luma - threshold) / (1.0 - threshold + 1e-5), min=0.0, max=1.0)
         bright_pixels = rgb * bright_mask
 
@@ -182,7 +186,6 @@ class ColorGrader:
         bloom2 = F.interpolate(bloom1, scale_factor=0.5, mode="bilinear", align_corners=False)
         bloom3 = F.interpolate(bloom2, scale_factor=0.5, mode="bilinear", align_corners=False)
 
-        # Upsample back
         up3 = F.interpolate(bloom3, size=(h, w), mode="bilinear", align_corners=False)
         up2 = F.interpolate(bloom2, size=(h, w), mode="bilinear", align_corners=False)
         up1 = F.interpolate(bloom1, size=(h, w), mode="bilinear", align_corners=False)
@@ -193,7 +196,6 @@ class ColorGrader:
     def _aces_tonemap(self, rgb: torch.Tensor) -> torch.Tensor:
         """
         Krzysztof Narkowicz ACES Filmic Tone Mapping approximation.
-        Provides beautiful highlights compression, rich contrast, and cinematic color roll-off.
         """
         a = 2.51
         b = 0.03
@@ -227,7 +229,7 @@ class ColorGrader:
 
     def _apply_film_grain(self, rgb: torch.Tensor, amount: float) -> torch.Tensor:
         """
-        Adds subtle cinematographic film grain to eliminate digital color banding.
+        Adds micro-fine film grain to eliminate digital banding if explicitly requested.
         """
         noise = (torch.rand_like(rgb) - 0.5) * 2.0 * amount
         return torch.clamp(rgb + noise, min=0.0, max=1.0)

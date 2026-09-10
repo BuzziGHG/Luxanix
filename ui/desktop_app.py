@@ -36,7 +36,7 @@ class LuxanixDesktopApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("⚡ Luxanix Studio Pro v2.0.0 — CapCut NLE AI Video Editor (NVIDIA RTX 50 Ready)")
+        self.title("⚡ Luxanix Studio Pro v2.1.0 — CapCut NLE AI Video Editor (NVIDIA RTX 50 Ready)")
         self.geometry("1520x960")
         self.minsize(1240, 800)
         self.configure(fg_color="#0b0e13")
@@ -166,7 +166,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         badge = ctk.CTkLabel(
             left_box,
-            text="CAPCUT PRO v2.0.0",
+            text="CAPCUT PRO v2.1.0",
             font=ctk.CTkFont(size=10, weight="bold"),
             fg_color="#00c4cc",
             text_color="#000000",
@@ -1500,7 +1500,7 @@ class LuxanixDesktopApp(ctk.CTk):
             pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
             small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
 
-            auto_params = self.auto_realism.analyze_and_compute(small_rgb, master_intensity=self.realism_intensity)
+            auto_params = self.auto_realism.analyze_and_compute(small_rgb, master_intensity=self.realism_intensity, smooth=False)
             if self.pipeline is not None:
                 out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
             else:
@@ -1559,6 +1559,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
     def _on_intensity_change(self, val):
         self.realism_intensity = float(val)
+        self.auto_realism.reset()
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
 

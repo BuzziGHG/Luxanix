@@ -233,28 +233,58 @@ class VideoPipeline:
                 params[k] = v
 
         # ---------------------------------------------------------------
-        # FAST PREVIEW PATH — skips depth + raytracing for real-time playback
-        # This delivers ~30fps live preview vs. ~1-3fps with full pipeline.
-        # Only applies when params['fast_preview'] is True (set by playback thread).
+        # FAST PREVIEW PATH — GPU-accelerated real-time RTX preview
+        # Calculates depth on a fast 360p thumbnail (~34ms on GPU) and upscales on GPU.
+        # Executes GPU ray-marched SSR and contact shadows (RTAO) with preview samples.
+        # Photorealismus slider changes are immediately visible.
         # ---------------------------------------------------------------
         if params.get("fast_preview", False):
+            h_fp, w_fp = frame_proc.shape[:2]
+            intensity = params.get("realism_intensity", 1.0)
+
+            # 360p thumbnail for ultra-fast GPU depth estimation
+            thumb_h = 360
+            thumb_w = int(w_fp * (thumb_h / h_fp))
+            thumb_w = max(16, thumb_w - (thumb_w % 2))
+            thumb_rgb = cv2.resize(frame_proc, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
+
+            try:
+                depth_thumb = self.depth_estimator.estimate_depth(thumb_rgb).to(device=self.device, dtype=self.dtype)
+                depth = F.interpolate(depth_thumb, size=(h_fp, w_fp), mode="bilinear", align_corners=False)
+            except Exception:
+                depth = torch.ones(1, 1, h_fp, w_fp, device=self.device, dtype=self.dtype) * 0.5
+
             color_np = frame_proc.astype(np.float32) / 255.0
             color_tensor = torch.from_numpy(color_np).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.dtype)
 
-            # Minimal RT buffers — skip raytracing, pass neutral buffers
-            h_fp, w_fp = frame_proc.shape[:2]
-            empty_rt = {
-                "rtao": torch.ones(1, 1, h_fp, w_fp, device=self.device, dtype=self.dtype),
-                "rtgi": torch.zeros(1, 3, h_fp, w_fp, device=self.device, dtype=self.dtype),
-                "ssr":  torch.zeros(1, 3, h_fp, w_fp, device=self.device, dtype=self.dtype),
-                "normals": torch.zeros(1, 3, h_fp, w_fp, device=self.device, dtype=self.dtype),
-            }
-            output_tensor = self.grader.grade(color_tensor, empty_rt, params)
+            # Fast GPU raytracing configuration
+            preview_params = dict(params)
+            preview_params["rtao_samples"] = 4
+            preview_params["ssr_steps"]    = 8
+            preview_params["rtgi_steps"]   = 0
+            preview_params["rtgi_intensity"] = 0.0
+
+            rt_results = self.raytracer.trace(color_tensor, depth, preview_params)
+            output_tensor = self.grader.grade(color_tensor, rt_results, preview_params)
+
             out_np = (output_tensor.squeeze(0).permute(1, 2, 0).cpu().float().numpy() * 255.0).clip(0, 255).astype(np.uint8)
             if needs_resize:
                 out_np = cv2.resize(out_np, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-            blank = np.zeros((orig_h, orig_w, 3), dtype=np.uint8)
-            return out_np, blank, blank
+
+            # Visualizations for Depth & Normals
+            depth_np = depth.squeeze().cpu().float().numpy()
+            depth_viz = (depth_np * 255.0).clip(0, 255).astype(np.uint8)
+            depth_viz = cv2.applyColorMap(depth_viz, cv2.COLORMAP_INFERNO)
+            depth_viz = cv2.cvtColor(depth_viz, cv2.COLOR_BGR2RGB)
+            if needs_resize:
+                depth_viz = cv2.resize(depth_viz, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+
+            normals_np = rt_results["normals"].squeeze(0).permute(1, 2, 0).cpu().float().numpy()
+            normals_viz = ((normals_np * 0.5 + 0.5) * 255.0).clip(0, 255).astype(np.uint8)
+            if needs_resize:
+                normals_viz = cv2.resize(normals_viz, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+
+            return out_np, depth_viz, normals_viz
 
         # ---------------------------------------------------------------
         # FULL QUALITY PATH — used for export and single-frame scrub preview
@@ -443,7 +473,7 @@ class VideoPipeline:
             cmd.append(output_path)
 
             try:
-                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return proc
             except Exception:
                 continue
@@ -468,7 +498,7 @@ class VideoPipeline:
                 "-pix_fmt", "yuv420p",
                 output_path
             ])
-            return subprocess.Popen(cmd_cpu, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            return subprocess.Popen(cmd_cpu, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             return None
 
@@ -618,9 +648,14 @@ class VideoPipeline:
             out_w = out_w - (out_w % 2)
             out_h = 8192
 
-        temp_video_no_audio = output_path.replace(".mp4", "_temp_raw.mp4")
-        temp_extracted_audio = output_path.replace(".mp4", "_orig_audio.aac")
-        final_audio = output_path.replace(".mp4", "_final_audio.aac")
+        # Create isolated temporary directory inside OS Temp folder
+        # Never writes temporary raw video or audio files into the user's render folder!
+        import tempfile
+        import shutil
+        temp_dir = tempfile.mkdtemp(prefix="luxanix_export_")
+        temp_video_no_audio = os.path.join(temp_dir, "temp_raw.mp4")
+        temp_extracted_audio = os.path.join(temp_dir, "orig_audio.aac")
+        final_audio = os.path.join(temp_dir, "final_audio.aac")
 
         # Audio options
         music_path = params.get("music_path", None)
@@ -781,15 +816,26 @@ class VideoPipeline:
             if c_evt is not None and c_evt.is_set():
                 if use_pipe and proc is not None:
                     try:
+                        proc.stdin.close()
                         proc.kill()
+                        proc.wait(timeout=5)
                     except Exception:
                         pass
-                for p in [output_path, temp_video_no_audio, temp_extracted_audio, final_audio]:
-                    if os.path.exists(p):
+                elif writer is not None:
+                    try:
+                        writer.release()
+                    except Exception:
+                        pass
+
+                # Clean up incomplete output file if cancelled
+                time.sleep(0.15)
+                for _ in range(5):
+                    if os.path.exists(output_path):
                         try:
-                            os.remove(p)
+                            os.remove(output_path)
+                            break
                         except Exception:
-                            pass
+                            time.sleep(0.2)
             else:
                 if use_pipe:
                     try:
@@ -810,13 +856,12 @@ class VideoPipeline:
                         dual_nvenc=dual_nvenc,
                     )
 
-        # Cleanup temp files
-        for tmp in [temp_video_no_audio, temp_extracted_audio, final_audio]:
-            if os.path.exists(tmp):
-                try:
-                    os.remove(tmp)
-                except Exception:
-                    pass
+        # Cleanup isolated temp directory completely
+        time.sleep(0.15)
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
         print(f"[Luxanix] Render vollständig! Gespeichert in: {output_path}")
         return output_path
