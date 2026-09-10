@@ -1437,11 +1437,40 @@ class LuxanixDesktopApp(ctk.CTk):
         dur_f = int((self.total_duration_sec - int(self.total_duration_sec)) * 30)
         self.lbl_timecode.configure(text=f"{m:02d}:{s:02d}:{f:02d} / {dur_m:02d}:{dur_s:02d}:{dur_f:02d}")
 
-        # Update Live Telemetry
-        self.lbl_telem_exp.configure(text=f"• Belichtung: {auto_params.get('exposure', 0.0):+.2f} EV (Kontrast: {auto_params.get('contrast', 1.15):.2f})")
-        self.lbl_telem_wet.configure(text=f"• Nässe / SSR: {auto_params.get('ssr_intensity', 0.5):.2f} (Spiegelung aktiv)")
-        self.lbl_telem_rtgi.configure(text=f"• RTGI Streulicht: {auto_params.get('rtgi_intensity', 0.5):.2f} Bounce")
-        self.lbl_telem_rtao.configure(text=f"• RTAO Kontaktschatten: {auto_params.get('rtao_intensity', 0.6):.2f}")
+        # Update Live Telemetry — now includes full auto color science
+        scene = auto_params.get("scene_type", "daylight")
+        scene_icons = {
+            "night": "🌑", "low_light": "🌒", "golden_hour": "🌅",
+            "overcast": "☁️", "daylight": "☀️", "bright_day": "🌞", "indoor": "💡"
+        }
+        scene_icon = scene_icons.get(scene, "🎬")
+
+        ev   = auto_params.get("exposure", 0.0)
+        cont = auto_params.get("contrast", 1.15)
+        temp = auto_params.get("temperature", 0.0)
+        sat  = auto_params.get("saturation", 1.0)
+        vib  = auto_params.get("vibrance", 0.0)
+        ssr  = auto_params.get("ssr_intensity", 0.5)
+        rtgi = auto_params.get("rtgi_intensity", 0.5)
+        rtao = auto_params.get("rtao_intensity", 0.6)
+        slift = auto_params.get("shadow_lift", 0.0)
+        hroll = auto_params.get("highlight_rolloff", 0.0)
+        vig  = auto_params.get("vignette", 0.0)
+
+        temp_dir = "→ warm" if temp > 0.02 else ("→ cool" if temp < -0.02 else "→ neutral")
+
+        self.lbl_telem_exp.configure(
+            text=f"• {scene_icon} Szene: {scene}  |  Belichtung: {ev:+.2f} EV  |  Kontrast: {cont:.2f}"
+        )
+        self.lbl_telem_wet.configure(
+            text=f"• 🎨 WB: {temp:+.2f} ({temp_dir})  |  Sättigung: {sat:.2f}×  |  Vibrance: +{vib:.2f}"
+        )
+        self.lbl_telem_rtgi.configure(
+            text=f"• 🌑 Shadow Lift: {slift:.3f}  |  Highlight Rolloff: {hroll:.2f}  |  Vignette: {vig:.2f}"
+        )
+        self.lbl_telem_rtao.configure(
+            text=f"• ⚡ RTX — SSR: {ssr:.2f}  RTGI: {rtgi:.2f}  RTAO: {rtao:.2f}"
+        )
 
     def _seek_to_time(self, target_sec):
         self.current_time_sec = target_sec

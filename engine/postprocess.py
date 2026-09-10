@@ -26,90 +26,113 @@ class ColorGrader:
         params: Dict[str, Any],
     ) -> torch.Tensor:
         """
-        Combines base image with Ray Traced lighting and applies full color grading.
-
-        Args:
-            base_color: (B, 3, H, W) normalized base frame in [0, 1].
-            rt_buffers: Dict with 'rtgi', 'ssr', 'rtao'.
-            params: Dictionary containing user-adjusted parameters.
-
-        Returns:
-            torch.Tensor: (B, 3, H, W) graded output in [0, 1].
+        Full autonomous color science pipeline:
+          RTX Composite → Exposure → Contrast → Shadow Lift → Highlight Rolloff
+          → Auto White Balance (Temperature) → Auto Saturation → Vibrance
+          → Bloom → Tone Mapping → Vignette → Clarity → Film Grain
         """
         ao = rt_buffers.get("rtao", torch.ones_like(base_color[:, :1]))
         rtgi = rt_buffers.get("rtgi", torch.zeros_like(base_color))
         ssr = rt_buffers.get("ssr", torch.zeros_like(base_color))
 
         # 1. Physically-Based Composite (atmosphere-preserving)
-        # AO is kept very close to 1.0 so it doesn't darken the whole scene.
-        # RTGI and SSR are blended in as additive highlights only on bright areas
-        # (wet reflections, indirect bounces) — not affecting overall luminance.
-        # Clamp AO to [0.85, 1.0] so it only adds subtle contact shadow, not full darkness.
         ao_clamped = torch.clamp(ao, min=0.85, max=1.0)
         composited = base_color * ao_clamped
-
-        # RTX effects: additive, but scaled down to stay subtle
-        # Only blend into areas that have existing luminance (avoids brightening flat darks)
         rtgi_weight = params.get("rtgi_intensity", 0.25)
         ssr_weight  = params.get("ssr_intensity",  0.15)
         composited = composited + rtgi * rtgi_weight * 0.4 + ssr * ssr_weight * 0.4
 
-        # 2. Exposure adjustment (in EV stops: 2^ev) — now very small range from auto_realism
+        # 2. Exposure (EV stops)
         exposure = params.get("exposure", 0.0)
         if exposure != 0.0:
             composited = composited * (2.0 ** exposure)
 
-        # 3. Contrast adjustment (around midpoint 0.18 middle-grey)
+        # 3. Contrast S-Curve (around 0.18 middle-grey)
         contrast = params.get("contrast", 1.0)
         if contrast != 1.0:
             composited = torch.clamp((composited - 0.18) * contrast + 0.18, min=0.0)
 
-        # 4. Color Temperature and Tint
-        temp = params.get("temperature", 0.0)  # -1.0 (cool/blue) to +1.0 (warm/orange)
-        if temp != 0.0:
+        # 4. Shadow Lift — raises black point gently for cinematic detail recovery
+        shadow_lift = params.get("shadow_lift", 0.0)
+        if shadow_lift > 0.0:
+            composited = self._apply_shadow_lift(composited, shadow_lift)
+
+        # 5. Highlight Rolloff — soft shoulder on blown highlights / speculars
+        highlight_rolloff = params.get("highlight_rolloff", 0.0)
+        if highlight_rolloff > 0.0:
+            composited = self._apply_highlight_rolloff(composited, highlight_rolloff)
+
+        # 6. Color Temperature (auto white balance / Kelvin shift)
+        temp = params.get("temperature", 0.0)  # -1.0 cool/blue … +1.0 warm/orange
+        if abs(temp) > 0.005:
             r_scale = 1.0 + temp * 0.15
             b_scale = 1.0 - temp * 0.15
-            color_weights = torch.tensor([r_scale, 1.0, b_scale], device=self.device, dtype=composited.dtype).view(1, 3, 1, 1)
+            color_weights = torch.tensor(
+                [r_scale, 1.0, b_scale], device=self.device, dtype=composited.dtype
+            ).view(1, 3, 1, 1)
             composited = composited * color_weights
 
-        # 5. Saturation & Vibrance
+        # 7. Auto Saturation & Smart Vibrance
         saturation = params.get("saturation", 1.0)
-        vibrance = params.get("vibrance", 0.0)
+        vibrance   = params.get("vibrance", 0.0)
         if saturation != 1.0 or vibrance != 0.0:
             composited = self._apply_saturation_vibrance(composited, saturation, vibrance)
 
-        # 6. Multi-scale Bloom (RTX Glow on headlights & reflections)
+        # 8. Bloom (RTX headlight & sun glow)
         bloom_intensity = params.get("bloom_intensity", 0.10)
         bloom_threshold = params.get("bloom_threshold", 0.85)
         if bloom_intensity > 0.0:
             composited = self._apply_bloom(composited, bloom_intensity, bloom_threshold)
 
-        # 7. Tone Mapping: use a gentler Reinhard-style for cinematic dark scenes,
-        # ACES only when explicitly requested (it compresses midtones heavily).
-        use_aces = params.get("use_aces", False)   # Default OFF — preserves mood
+        # 9. Tone Mapping (Soft Reinhard default — preserves cinematic darks)
+        use_aces = params.get("use_aces", False)
         if use_aces:
             composited = self._aces_tonemap(composited)
         else:
-            # Soft Reinhard: only compresses near-white highlights, leaves darks intact
-            composited = composited / (composited + 0.5)   # very gentle shoulder
-            composited = torch.clamp(composited * 1.04, 0.0, 1.0)  # slight exposure compensation for the division
+            composited = composited / (composited + 0.5)
+            composited = torch.clamp(composited * 1.04, 0.0, 1.0)
 
-        # 8. Subtle Lens Vignette
+        # 10. Cinematic Lens Vignette
         vignette_amount = params.get("vignette", 0.0)
         if vignette_amount > 0.0:
             composited = self._apply_vignette(composited, vignette_amount)
 
-        # 9. Texture Clarity & Detail Sharpening (Anti-TAA Blur)
+        # 11. Detail Clarity / TAA Sharpening
         clarity = params.get("clarity", 0.3)
         if clarity > 0.0:
             composited = self._apply_clarity(composited, clarity)
 
-        # 10. Subtle Cinematic Film Grain (Reduces banding)
+        # 12. Adaptive Film Grain
         film_grain = params.get("film_grain", 0.0)
         if film_grain > 0.0:
             composited = self._apply_film_grain(composited, film_grain)
 
         return torch.clamp(composited, 0.0, 1.0)
+
+    def _apply_shadow_lift(self, rgb: torch.Tensor, lift: float) -> torch.Tensor:
+        """
+        Gently raises the black point for cinematic shadow detail recovery.
+        Uses a toe curve: only affects the dark quarter of the tonal range.
+        lift: 0.0 = no change, 0.05 = professional grade lift
+        """
+        # Shadows are values below 0.20 — apply a smooth lift only there
+        shadow_mask = torch.clamp(1.0 - rgb / 0.20, min=0.0, max=1.0)
+        return rgb + shadow_mask * lift
+
+    def _apply_highlight_rolloff(self, rgb: torch.Tensor, rolloff: float) -> torch.Tensor:
+        """
+        Soft-clips bright highlights above 0.75 to prevent harsh clipping of speculars.
+        Uses a smooth S-shaped shoulder: highlights are compressed, not clipped hard.
+        rolloff: 0.0 = no rolloff, 1.0 = strong compression
+        """
+        # Only compress above the shoulder threshold
+        threshold = 0.75
+        weights = torch.tensor([0.2126, 0.7152, 0.0722], device=self.device, dtype=rgb.dtype).view(1, 3, 1, 1)
+        luma = (rgb * weights).sum(dim=1, keepdim=True)
+        hi_mask = torch.clamp((luma - threshold) / (1.0 - threshold + 1e-5), min=0.0, max=1.0)
+        # Compress highlights: blend toward 1.0 softly
+        compressed = rgb - hi_mask * (rgb - 1.0) * rolloff * 0.3
+        return torch.clamp(compressed, 0.0, 1.0)
 
     def _apply_saturation_vibrance(
         self,
