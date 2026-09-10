@@ -24,6 +24,8 @@ from .raytracer import ScreenSpaceRaytracer
 from .denoiser import BilateralDenoiser
 from .postprocess import ColorGrader
 from .auto_preset import AutoSceneOptimizer
+from .auto_realism import AutonomousRealismEngine
+from .upscaler import NeuralUpscaler
 
 
 def get_video_info(video_path: str) -> Dict[str, Any]:
@@ -115,6 +117,8 @@ class VideoPipeline:
         self.denoiser = BilateralDenoiser(device=self.device)
         self.grader = ColorGrader(device=self.device)
         self.auto_optimizer = AutoSceneOptimizer()
+        self.auto_realism = AutonomousRealismEngine()
+        self.upscaler = NeuralUpscaler(device=self.device, use_fp16=self.use_fp16)
 
     def process_single_frame(
         self,
@@ -138,9 +142,11 @@ class VideoPipeline:
         else:
             frame_proc = frame_rgb
 
-        # Auto-Adaptive AI Preset (Dynamic Scene Optimizer per Frame/Millisecond)
-        if params.get("auto_preset", False):
-            params = self.auto_optimizer.analyze_and_optimize(frame_proc, None, params)
+        # Autonomous AI Realism Engine (Real-time physical calculation without presets)
+        if params.get("auto_realism", True) or params.get("auto_preset", False):
+            auto_vals = self.auto_realism.analyze_and_compute(frame_proc, master_intensity=params.get("realism_intensity", 1.0))
+            for k, v in auto_vals.items():
+                params[k] = v
 
         # 1. Depth Estimation
         depth = self.depth_estimator.estimate_depth(frame_proc).to(device=self.device, dtype=self.dtype)
@@ -300,14 +306,14 @@ class VideoPipeline:
                 # Process through RTX Raytracing engine
                 out_rgb, _, _ = self.process_single_frame(frame_rgb, params)
 
-                # Scale output if custom resolution selected
+                # Scale output using Neural AI Super-Resolution if custom resolution selected
                 if (out_w != width) or (out_h != height):
-                    out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
-                    if out_h >= 4320:
-                        # 8K Super-Resolution Detail Enhancement (Edge-preserving clarity)
-                        blurred = cv2.GaussianBlur(out_rgb, (0, 0), 1.2)
-                        detail = cv2.addWeighted(out_rgb, 1.25, blurred, -0.25, 0)
-                        out_rgb = np.clip(detail, 0, 255).astype(np.uint8)
+                    if params.get("neural_upscale", True) and (out_h > height):
+                        out_rgb = self.upscaler.upscale_frame(out_rgb, target_height=out_h)
+                        if out_rgb.shape[1] != out_w or out_rgb.shape[0] != out_h:
+                            out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+                    else:
+                        out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
 
                 out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
                 writer.write(out_bgr)

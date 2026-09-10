@@ -1,13 +1,10 @@
 """
-Luxanix Studio — Native CapCut-Style Desktop NLE Edition
-GPU-accelerated desktop application for Raytracing, 8K Upscaling & Photorealistic Remastering.
-Inspired by CapCut Pro Desktop video editor layout:
-- Top Header Bar (Branding, Project Title, Auto-Save, Shortcuts, Prominent Export Button)
-- Top-Left Panel (Media Library, Raytracing Presets Card Grid, Auto-AI, Color Grading)
-- Top-Center Panel (Player Monitor, Aspect Ratio Selector, 50/50 Split Compare, Transport Controls)
-- Top-Right Panel (Inspector: Raytracing, Hardware RTX 50, Lighting/AI, 8K Export)
-- Bottom Panel (Multi-Track Timeline: Toolbar, Ruler, Playhead Needle, V1 Video Strip with Thumbnails, FX Track, A1 Audio Waveform)
-- Bottom-most Render & Status Bar
+Luxanix Studio Pro — Autonomous AI Video Editor (CapCut Desktop NLE Edition)
+A full-featured modern video editor with NVIDIA RTX Tensor-Core AI Photorealism & 8K Super-Resolution.
+- 100% Autonomous Realism Engine: Autonomously calculates lighting, depth, asphalt wetness, SSR, RTGI, and RTAO per frame.
+- Real Neural AI Super-Resolution Upscaler (1080p -> 4K -> 8K) on CUDA Tensor Cores.
+- Continuous Full-Video Player: Play and scrub the ENTIRE video from 00:00 to the end with live RTX Remastering and A/B Split Screen.
+- Full NLE Timeline Editing: Cut/split clips (Ctrl+B), delete segments (Del), trim handles, and multi-track display.
 """
 
 import os
@@ -27,8 +24,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from engine.video_pipeline import VideoPipeline, get_video_info
-from engine.hardware import detect_gpu_hardware, get_profile_settings, get_all_profiles
-from engine.auto_preset import AutoSceneOptimizer
+from engine.hardware import detect_gpu_hardware, get_profile_settings
+from engine.auto_realism import AutonomousRealismEngine
+from engine.upscaler import NeuralUpscaler
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("green")
@@ -38,9 +36,9 @@ class LuxanixDesktopApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("⚡ Luxanix Studio Pro — AI Raytracing & 8K Video Remaster (NVIDIA RTX 50 Ready)")
-        self.geometry("1480x940")
-        self.minsize(1220, 800)
+        self.title("⚡ Luxanix Studio Pro — Autonomous AI Video Editor (NVIDIA RTX 50 Ready)")
+        self.geometry("1520x960")
+        self.minsize(1240, 800)
         self.configure(fg_color="#0b0e13")
 
         icon_path = os.path.join(PROJECT_ROOT, "assets", "icon.ico")
@@ -50,72 +48,96 @@ class LuxanixDesktopApp(ctk.CTk):
             except Exception:
                 pass
 
-        # State Variables
-        self.video_path = None
-        self.video_info = {}
+        # Core Engines
         self.pipeline = None
-        self.auto_optimizer = AutoSceneOptimizer(smoothing_alpha=0.25)
+        self.auto_realism = AutonomousRealismEngine()
+        self.neural_upscaler = None
         self.gpu_info = detect_gpu_hardware()
         self.current_profile_key = getattr(self.gpu_info, "recommended_profile", "ultra")
 
-        # Load Presets from presets.json
-        self.presets_data = {}
-        presets_file = os.path.join(PROJECT_ROOT, "presets.json")
-        if os.path.exists(presets_file):
-            try:
-                with open(presets_file, "r", encoding="utf-8") as f:
-                    self.presets_data = json.load(f)
-            except Exception:
-                pass
+        # Video & Timeline State
+        self.video_path = None
+        self.video_info = {}
+        self.video_cap = None
+        self.total_duration_sec = 0.0
+        self.total_frames = 0
+        self.fps = 30.0
 
-        # Playback & Preview State
-        self.preview_frames_cache = []
+        # Timeline Segments: List of dicts representing edited cuts
+        # Each segment: {"start": 0.0, "end": 10.0, "title": "Clip 1"}
+        self.timeline_segments = []
+        self.selected_segment_idx = 0
+
+        # Continuous Playback State (Entire Video)
         self.is_playing = False
-        self.playback_idx = 0
-        self.split_view_mode = "Remaster"
+        self.current_time_sec = 0.0
+        self.play_thread = None
+        self.stop_playback_flag = False
+        self.playback_speed = 1.0
+
+        # Display & View Mode
+        self.split_view_mode = "Remaster"  # "Remaster", "Split", "Original", "Depth"
         self.aspect_ratio_mode = "16:9"
+        self.realism_intensity = 1.0
         self.is_rendering = False
-        self.stop_render_flag = False
 
-        # Timeline Trimming State
-        self.trim_start_sec = 0.0
-        self.trim_end_sec = 10.0
-        self.playhead_pos_pct = 0.0
+        # Live telemetry metrics
+        self.telemetry = {
+            "exposure": 0.0,
+            "contrast": 1.15,
+            "ssr": 0.55,
+            "rtgi": 0.60,
+            "rtao": 0.65,
+            "wetness": 0.50
+        }
 
-        self._build_capcut_ui()
+        self._build_capcut_nle_ui()
+        self._bind_shortcuts()
         self._init_pipeline_async()
 
     def _init_pipeline_async(self):
         def init():
             try:
-                self.after(0, lambda: self.lbl_status.configure(text="⚡ Initialisiere NVIDIA RTX Pipeline & Depth Anything v2 Tensor Cores..."))
+                self.after(0, lambda: self.lbl_status.configure(text="⚡ Initialisiere NVIDIA RTX Pipeline & Neural Tensor-Core Engine..."))
                 self.pipeline = VideoPipeline()
+                self.neural_upscaler = NeuralUpscaler(device=self.pipeline.device, use_fp16=self.pipeline.use_fp16)
                 gpu_name = getattr(self.gpu_info, "device_name", "NVIDIA RTX")
-                self.after(0, lambda: self.lbl_status.configure(text=f"✅ {gpu_name} Tensor-Core Engine bereit (RTX 50 / 40 / 30 optimiert)."))
+                self.after(0, lambda: self.lbl_status.configure(text=f"✅ {gpu_name} Tensor-Core Engine aktiv (Echtzeit-Berechnung bereit)."))
             except Exception as e:
                 self.after(0, lambda err=str(e): self.lbl_status.configure(text=f"Warnung bei Initialisierung: {err}"))
         threading.Thread(target=init, daemon=True).start()
 
-    def _build_capcut_ui(self):
+    def _bind_shortcuts(self):
+        self.bind("<space>", lambda e: self._toggle_playback())
+        self.bind("<Control-b>", lambda e: self._split_clip_at_playhead())
+        self.bind("<Delete>", lambda e: self._delete_selected_segment())
+        self.bind("<Left>", lambda e: self._step_time(-0.5))
+        self.bind("<Right>", lambda e: self._step_time(+0.5))
+
+    # =========================================================================
+    # CAPCUT NLE INTERFACE BUILDER
+    # =========================================================================
+    def _build_capcut_nle_ui(self):
         self.grid_rowconfigure(0, weight=0, minsize=44)
         self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=0, minsize=210)
+        self.grid_rowconfigure(2, weight=0, minsize=215)
         self.grid_rowconfigure(3, weight=0, minsize=38)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_header_bar()
-        self._build_main_workspace()
-        self._build_timeline_panel()
-        self._build_status_bar()
+        self._build_top_header()
+        self._build_center_workspace()
+        self._build_bottom_timeline()
+        self._build_bottom_statusbar()
 
     # 1. TOP HEADER BAR
-    def _build_header_bar(self):
+    def _build_top_header(self):
         self.header = ctk.CTkFrame(self, fg_color="#101318", height=44, corner_radius=0)
         self.header.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
         self.header.grid_propagate(False)
 
+        # Left: Brand & Menu
         left_box = ctk.CTkFrame(self.header, fg_color="transparent")
-        left_box.pack(side="left", padx=14, pady=6)
+        left_box.pack(side="left", padx=12, pady=6)
 
         lbl_logo = ctk.CTkLabel(
             left_box,
@@ -125,9 +147,9 @@ class LuxanixDesktopApp(ctk.CTk):
         )
         lbl_logo.pack(side="left", padx=(0, 4))
 
-        badge_pro = ctk.CTkLabel(
+        badge = ctk.CTkLabel(
             left_box,
-            text="PRO",
+            text="PRO EDITOR",
             font=ctk.CTkFont(size=10, weight="bold"),
             fg_color="#00c4cc",
             text_color="#000000",
@@ -135,21 +157,20 @@ class LuxanixDesktopApp(ctk.CTk):
             padx=5,
             pady=1
         )
-        badge_pro.pack(side="left", padx=(0, 14))
+        badge.pack(side="left", padx=(0, 12))
 
-        for item in ["Menü", "Datei", "Bearbeiten", "Layout"]:
-            btn_menu = ctk.CTkButton(
+        for menu_name in ["Datei", "Bearbeiten", "Schnitt", "Ansicht"]:
+            b = ctk.CTkButton(
                 left_box,
-                text=item,
+                text=menu_name,
                 font=ctk.CTkFont(size=11),
                 fg_color="transparent",
                 hover_color="#1c222b",
                 text_color="#94a3b8",
-                width=50,
-                height=26,
-                command=self._on_menu_click
+                width=45,
+                height=26
             )
-            btn_menu.pack(side="left", padx=2)
+            b.pack(side="left", padx=1)
 
         self.lbl_autosave = ctk.CTkLabel(
             left_box,
@@ -161,39 +182,39 @@ class LuxanixDesktopApp(ctk.CTk):
             padx=8,
             pady=2
         )
-        self.lbl_autosave.pack(side="left", padx=14)
+        self.lbl_autosave.pack(side="left", padx=12)
 
+        # Center: Project Title & Shortcuts Hint
         center_box = ctk.CTkFrame(self.header, fg_color="transparent")
         center_box.pack(side="left", expand=True)
 
         self.entry_proj_name = ctk.CTkEntry(
             center_box,
-            width=260,
+            width=240,
             height=26,
             font=ctk.CTkFont(size=11, weight="bold"),
             fg_color="#181d24",
             border_color="#27313f",
             corner_radius=4
         )
-        self.entry_proj_name.insert(0, "Assetto Corsa — RTX 50 Ultra Remaster")
+        self.entry_proj_name.insert(0, "Assetto Corsa — RTX Remaster")
         self.entry_proj_name.pack(side="left", padx=6)
 
-        lbl_shortcuts = ctk.CTkLabel(
+        ctk.CTkLabel(
             center_box,
-            text="⌨️ [Leertaste] Play/Pause   [Strg+B] Teilen   [F5] Vorschau",
+            text="⌨️ [Leertaste] Play/Pause   [Strg+B] Schneiden   [Entf] Löschen   [◄ / ►] Scrub",
             font=ctk.CTkFont(size=10),
             text_color="#64748b"
-        )
-        lbl_shortcuts.pack(side="left", padx=10)
+        ).pack(side="left", padx=10)
 
+        # Right: GPU Telemetry Badge & Prominent Export Button
         right_box = ctk.CTkFrame(self.header, fg_color="transparent")
         right_box.pack(side="right", padx=12, pady=6)
 
         gpu_name = getattr(self.gpu_info, "device_name", "NVIDIA RTX")
-        vram = getattr(self.gpu_info, "vram_gb", 12.0)
         self.lbl_header_gpu = ctk.CTkLabel(
             right_box,
-            text=f"⚡ {gpu_name} ({vram:.0f}GB)",
+            text=f"⚡ {gpu_name} (Tensor Cores Aktiv)",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#76b900",
             fg_color="#172217",
@@ -203,7 +224,7 @@ class LuxanixDesktopApp(ctk.CTk):
         )
         self.lbl_header_gpu.pack(side="left", padx=(0, 10))
 
-        self.btn_header_export = ctk.CTkButton(
+        self.btn_export = ctk.CTkButton(
             right_box,
             text="🚀 Exportieren",
             font=ctk.CTkFont(size=12, weight="bold"),
@@ -213,32 +234,32 @@ class LuxanixDesktopApp(ctk.CTk):
             width=120,
             height=30,
             corner_radius=5,
-            command=self._open_export_modal
+            command=self._start_full_render
         )
-        self.btn_header_export.pack(side="left")
+        self.btn_export.pack(side="left")
 
-    # 2. MAIN WORKSPACE
-    def _build_main_workspace(self):
+    # 2. CENTER WORKSPACE (Left Library, Center Player, Right Inspector)
+    def _build_center_workspace(self):
         self.workspace = ctk.CTkFrame(self, fg_color="#0b0e13", corner_radius=0)
         self.workspace.grid(row=1, column=0, sticky="nsew", padx=6, pady=4)
 
         self.workspace.grid_columnconfigure(0, weight=0, minsize=320)
         self.workspace.grid_columnconfigure(1, weight=1)
-        self.workspace.grid_columnconfigure(2, weight=0, minsize=330)
+        self.workspace.grid_columnconfigure(2, weight=0, minsize=320)
         self.workspace.grid_rowconfigure(0, weight=1)
 
-        self._build_left_library_panel()
-        self._build_center_player_panel()
-        self._build_right_inspector_panel()
+        self._build_left_panel()
+        self._build_center_player()
+        self._build_right_inspector()
 
-    # 2A. LEFT LIBRARY
-    def _build_left_library_panel(self):
+    # 2A. LEFT PANEL: MEDIEN & AUTONOME KI-ENGINE (No Presets!)
+    def _build_left_panel(self):
         panel = ctk.CTkFrame(self.workspace, fg_color="#10141a", corner_radius=6, border_width=1, border_color="#1a202a")
         panel.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=0)
         panel.grid_rowconfigure(0, weight=1)
         panel.grid_columnconfigure(0, weight=1)
 
-        self.lib_tabview = ctk.CTkTabview(
+        self.left_tabview = ctk.CTkTabview(
             panel,
             fg_color="transparent",
             segmented_button_fg_color="#161c24",
@@ -249,14 +270,13 @@ class LuxanixDesktopApp(ctk.CTk):
             text_color="#ffffff",
             height=36
         )
-        self.lib_tabview.grid(row=0, column=0, sticky="nsew", padx=6, pady=(4, 6))
+        self.left_tabview.grid(row=0, column=0, sticky="nsew", padx=6, pady=(4, 6))
 
-        tab_media = self.lib_tabview.add("📁 Medien")
-        tab_rt = self.lib_tabview.add("✨ Raytracing")
-        tab_ai = self.lib_tabview.add("🤖 Auto-AI")
-        tab_luts = self.lib_tabview.add("🎨 LUTs")
+        tab_media = self.left_tabview.add("📁 Medien")
+        tab_ai = self.left_tabview.add("⚡ Autonome KI")
+        tab_upscale = self.left_tabview.add("🔬 AI-Upscaler")
 
-        # TAB: MEDIEN
+        # --- TAB: MEDIEN ---
         box_import = ctk.CTkFrame(tab_media, fg_color="#151b22", corner_radius=6, border_width=1, border_color="#26313f")
         box_import.pack(fill="x", padx=4, pady=8)
 
@@ -274,7 +294,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_media_status = ctk.CTkLabel(
             box_import,
-            text="MP4, MKV, AVI, MOV bis 8K Ultra HD | Klick zum Auswählen",
+            text="Beliebiges Gameplay- oder Simracing-Video\n(MP4, MKV, AVI, MOV bis 8K)",
             font=ctk.CTkFont(size=10),
             text_color="#64748b",
             justify="center"
@@ -286,7 +306,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_clip_title = ctk.CTkLabel(
             self.card_clip_info,
-            text="📄 Kein Clip importiert",
+            text="📄 Kein Video geladen",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color="#e2e8f0",
             anchor="w"
@@ -295,7 +315,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_clip_details = ctk.CTkLabel(
             self.card_clip_info,
-            text="Wähle ein Video aus, um Schnitt & Remastering zu starten.",
+            text="Importiere ein Video, um den Player & Schnitt zu starten.",
             font=ctk.CTkFont(size=10),
             text_color="#94a3b8",
             justify="left",
@@ -303,163 +323,119 @@ class LuxanixDesktopApp(ctk.CTk):
         )
         self.lbl_clip_details.pack(fill="x", padx=10, pady=(0, 8))
 
-        # TAB: RAYTRACING
-        filter_frame = ctk.CTkFrame(tab_rt, fg_color="transparent")
-        filter_frame.pack(fill="x", padx=2, pady=(2, 6))
+        # --- TAB: AUTONOME KI-ENGINE (PURE REALISM - NO PRESETS!) ---
+        scroll_ai = ctk.CTkScrollableFrame(tab_ai, fg_color="transparent")
+        scroll_ai.pack(fill="both", expand=True, padx=2, pady=2)
 
-        filters = ["Alle", "RTX 50", "Nass", "Sunset", "Nürburg", "ACC"]
-        for f in filters:
-            b = ctk.CTkButton(
-                filter_frame,
-                text=f,
-                width=46,
-                height=22,
-                font=ctk.CTkFont(size=10),
-                fg_color="#18202a",
-                hover_color="#263445",
-                text_color="#cbd5e1",
-                command=lambda cat=f: self._filter_presets(cat)
-            )
-            b.pack(side="left", padx=2)
-
-        self.scroll_presets = ctk.CTkScrollableFrame(tab_rt, fg_color="transparent", width=310)
-        self.scroll_presets.pack(fill="both", expand=True, padx=2, pady=2)
-        self._populate_preset_cards()
-
-        # TAB: AUTO-AI
-        card_ai = ctk.CTkFrame(tab_ai, fg_color="#131e17", corner_radius=6, border_width=1, border_color="#10b981")
-        card_ai.pack(fill="x", padx=4, pady=8)
-
-        self.sw_auto_preset = ctk.CTkSwitch(
-            card_ai,
-            text="🤖 Auto-Preset (Echtzeit)",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            progress_color="#10b981",
-            command=self._on_auto_preset_toggle
-        )
-        self.sw_auto_preset.select()
-        self.sw_auto_preset.pack(anchor="w", padx=10, pady=(10, 4))
+        card_auto = ctk.CTkFrame(scroll_ai, fg_color="#131e17", corner_radius=6, border_width=1, border_color="#10b981")
+        card_auto.pack(fill="x", padx=2, pady=(4, 8))
 
         ctk.CTkLabel(
-            card_ai,
-            text="Analysiert Szenen pro Millisekunde dynamisch & passt RTGI-Streulicht, Scheinwerfer-Bloom und Reflexionen flüssig an.",
+            card_auto,
+            text="🤖 Autonome Physik-Berechnung",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#34d399"
+        ).pack(anchor="w", padx=10, pady=(8, 2))
+
+        ctk.CTkLabel(
+            card_auto,
+            text="Die KI berechnet Licht, Belichtung, Nässe-Reflexionen (SSR) und Kontaktschatten (RTAO) pro Frame komplett selbstständig. Keine manuellen Presets erforderlich!",
             font=ctk.CTkFont(size=10),
             text_color="#a7f3d0",
             justify="left",
-            wraplength=280
+            wraplength=270
         ).pack(anchor="w", padx=10, pady=(0, 8))
 
-        self.lbl_ai_metrics = ctk.CTkLabel(
-            card_ai,
-            text="⚡ Status: Frame-Analyse Aktiv (16ms Latenz)",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#34d399"
+        # Master Realism Intensity
+        ctk.CTkLabel(scroll_ai, text="Photorealismus-Stärke", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(6, 2))
+        self.slider_intensity = ctk.CTkSlider(
+            scroll_ai,
+            from_=0.2,
+            to=1.8,
+            button_color="#00c4cc",
+            progress_color="#00c4cc",
+            command=self._on_intensity_change
         )
-        self.lbl_ai_metrics.pack(anchor="w", padx=10, pady=(0, 10))
+        self.slider_intensity.set(1.0)
+        self.slider_intensity.pack(fill="x", padx=4, pady=(2, 8))
 
-        # TAB: LUTS
-        ctk.CTkLabel(tab_luts, text="Cinematische Farbprofile (LUTs)", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=8, pady=6)
-        lut_list = [
-            ("🎬 Cinema 35mm Realism", "Natürlicher Kontrast & feines Filmkorn"),
-            ("🏎️ Nordschleife Overcast", "Neutrales Licht, kühle Asphalt-Sättigung"),
-            ("🌆 Cyberpunk Neon Sunset", "Starke Farbspiegelungen auf nassem Boden"),
-            ("☀️ Monza High Noon", "Helle Spitzlichter und tiefe Kontaktschatten")
-        ]
-        for name, desc in lut_list:
-            box = ctk.CTkFrame(tab_luts, fg_color="#151b22", corner_radius=6)
-            box.pack(fill="x", padx=4, pady=3)
-            ctk.CTkLabel(box, text=name, font=ctk.CTkFont(size=11, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=8, pady=(4, 0))
-            ctk.CTkLabel(box, text=desc, font=ctk.CTkFont(size=9), text_color="#94a3b8").pack(anchor="w", padx=8, pady=(0, 4))
+        # Live Real-Time Telemetry Dashboard
+        card_telemetry = ctk.CTkFrame(scroll_ai, fg_color="#151b22", corner_radius=6)
+        card_telemetry.pack(fill="x", padx=2, pady=4)
 
-    def _populate_preset_cards(self, category="Alle"):
-        for widget in self.scroll_presets.winfo_children():
-            widget.destroy()
+        ctk.CTkLabel(card_telemetry, text="Echtzeit-Berechnung Telemetrie:", font=ctk.CTkFont(size=10, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=8, pady=(6, 4))
+        self.lbl_telem_exp = ctk.CTkLabel(card_telemetry, text="• Auto-Belichtung: Berechne...", font=ctk.CTkFont(size=10), text_color="#94a3b8", anchor="w")
+        self.lbl_telem_exp.pack(fill="x", padx=8)
 
-        preset_items = list(self.presets_data.items()) if self.presets_data else [
-            ("⚡ RTX 50 Blackwell: Hyper-Path Tracing (8K Ultra)", {"description": "18 RTGI Bounces, 24 SSR Steps, AV1 Dual-NVENC"}),
-            ("🌧️ Simracing: Wet Track & Reflections", {"description": "Nasser Asphalt, ultra-starke Screen-Space Spiegelungen"}),
-            ("🌅 Simracing: Golden Hour Sunset", {"description": "Warmer Sonnenuntergang, weiches Bounce-Licht & Glow"}),
-            ("☁️ Simracing: Nürburgring Overcast", {"description": "Diffuses Licht, neutrale Farbtemperatur & Rennstrecken-Details"}),
-            ("🌃 Simracing: Night Race & Headlights", {"description": "Starker Scheinwerfer-Bloom, tiefe Nacht-Kontraste"}),
-            ("🏆 ACC / Assetto Corsa Hyper-Realism", {"description": "Perfekte Ausbalancierung für Simracing & Cockpit-Kameras"})
-        ]
+        self.lbl_telem_wet = ctk.CTkLabel(card_telemetry, text="• Fahrbahn-Nässe / SSR: Berechne...", font=ctk.CTkFont(size=10), text_color="#94a3b8", anchor="w")
+        self.lbl_telem_wet.pack(fill="x", padx=8)
 
-        for title, data in preset_items:
-            if category == "RTX 50" and "50" not in title and "Blackwell" not in title: continue
-            if category == "Nass" and "Wet" not in title and "Nass" not in title: continue
-            if category == "Sunset" and "Sunset" not in title and "Golden" not in title: continue
-            if category == "Nürburg" and "Nürburgring" not in title: continue
-            if category == "ACC" and "ACC" not in title and "Assetto" not in title: continue
+        self.lbl_telem_rtgi = ctk.CTkLabel(card_telemetry, text="• RTGI Streulicht: Berechne...", font=ctk.CTkFont(size=10), text_color="#94a3b8", anchor="w")
+        self.lbl_telem_rtgi.pack(fill="x", padx=8)
 
-            card = ctk.CTkFrame(self.scroll_presets, fg_color="#151a22", corner_radius=6, border_width=1, border_color="#202936")
-            card.pack(fill="x", padx=2, pady=4)
+        self.lbl_telem_rtao = ctk.CTkLabel(card_telemetry, text="• RTAO Kontaktschatten: Berechne...", font=ctk.CTkFont(size=10), text_color="#94a3b8", anchor="w")
+        self.lbl_telem_rtao.pack(fill="x", padx=8, pady=(0, 6))
 
-            header = ctk.CTkFrame(card, fg_color="transparent")
-            header.pack(fill="x", padx=8, pady=(6, 2))
+        # --- TAB: NEURAL AI-UPSCALER ---
+        scroll_up = ctk.CTkScrollableFrame(tab_upscale, fg_color="transparent")
+        scroll_up.pack(fill="both", expand=True, padx=2, pady=2)
 
-            lbl = ctk.CTkLabel(
-                header,
-                text=title,
-                font=ctk.CTkFont(size=11, weight="bold"),
-                text_color="#e2e8f0",
-                anchor="w",
-                wraplength=190,
-                justify="left"
-            )
-            lbl.pack(side="left", fill="x", expand=True)
+        card_up = ctk.CTkFrame(scroll_up, fg_color="#181d28", corner_radius=6, border_width=1, border_color="#3b82f6")
+        card_up.pack(fill="x", padx=2, pady=(4, 8))
 
-            btn_apply = ctk.CTkButton(
-                header,
-                text="Anwenden",
-                font=ctk.CTkFont(size=10, weight="bold"),
-                fg_color="#00c4cc",
-                hover_color="#009ea5",
-                text_color="#000000",
-                width=64,
-                height=24,
-                corner_radius=4,
-                command=lambda p_name=title: self._apply_preset_by_name(p_name)
-            )
-            btn_apply.pack(side="right")
+        ctk.CTkLabel(card_up, text="🔬 Neural Super-Resolution", font=ctk.CTkFont(size=11, weight="bold"), text_color="#60a5fa").pack(anchor="w", padx=10, pady=(8, 2))
+        ctk.CTkLabel(
+            card_up,
+            text="Echtes Deep Learning Upscaling via PyTorch PixelShuffle & Residual Dense Blocks auf Tensor Cores. Rekonstruiert feinste Texturen & Asphaltdetails.",
+            font=ctk.CTkFont(size=10),
+            text_color="#93c5fd",
+            justify="left",
+            wraplength=270
+        ).pack(anchor="w", padx=10, pady=(0, 8))
 
-            desc = data.get("description", "Photorealistisches Raytracing Preset")
-            lbl_d = ctk.CTkLabel(
-                card,
-                text=desc,
-                font=ctk.CTkFont(size=9),
-                text_color="#94a3b8",
-                anchor="w",
-                justify="left",
-                wraplength=270
-            )
-            lbl_d.pack(fill="x", padx=8, pady=(0, 6))
+        ctk.CTkLabel(scroll_up, text="Ziel-Auflösung für Export & Player:", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=4, pady=(4, 2))
+        self.combo_upscale = ctk.CTkComboBox(
+            scroll_up,
+            values=[
+                "Original Auflösung",
+                "2K QHD (1440p) — AI Detail Reconstruct",
+                "4K Ultra HD (2160p) — Neural Super-Resolution",
+                "8K Ultra HD (4320p) — Deep Sub-Pixel Reconstruct"
+            ]
+        )
+        self.combo_upscale.set("4K Ultra HD (2160p) — Neural Super-Resolution")
+        self.combo_upscale.pack(fill="x", padx=4, pady=4)
 
-    def _filter_presets(self, category):
-        self._populate_preset_cards(category)
+        self.sw_neural = ctk.CTkSwitch(
+            scroll_up,
+            text="NVIDIA Tensor-Core Upscaler aktivieren",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            progress_color="#00c4cc"
+        )
+        self.sw_neural.select()
+        self.sw_neural.pack(anchor="w", padx=6, pady=8)
 
-    # 2B. CENTER PLAYER MONITOR
-    def _build_center_player_panel(self):
+    # 2B. CENTER PLAYER: CONTINUOUS FULL-VIDEO STREAMING
+    def _build_center_player(self):
         panel = ctk.CTkFrame(self.workspace, fg_color="#0b0d11", corner_radius=6, border_width=1, border_color="#181e26")
         panel.grid(row=0, column=1, sticky="nsew", padx=2, pady=0)
         panel.grid_rowconfigure(1, weight=1)
         panel.grid_columnconfigure(0, weight=1)
 
+        # Top Bar: Format & Split Screen Compare
         player_top = ctk.CTkFrame(panel, fg_color="#12161d", height=36, corner_radius=0)
         player_top.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
 
         self.opt_aspect = ctk.CTkOptionMenu(
             player_top,
             values=["16:9 Breitbild", "21:9 Ultrawide", "32:9 Triple Screen", "9:16 Reel/Shorts", "Original"],
-            width=120,
+            width=115,
             height=24,
             font=ctk.CTkFont(size=10),
             command=self._on_aspect_change
         )
         self.opt_aspect.set("16:9 Breitbild")
         self.opt_aspect.pack(side="left", padx=8, pady=6)
-
-        lbl_zoom = ctk.CTkLabel(player_top, text="Zoom: Anpassen", font=ctk.CTkFont(size=10), text_color="#64748b")
-        lbl_zoom.pack(side="left", padx=6)
 
         self.seg_view_mode = ctk.CTkSegmentedButton(
             player_top,
@@ -474,6 +450,7 @@ class LuxanixDesktopApp(ctk.CTk):
         self.seg_view_mode.set("⚡ Remaster")
         self.seg_view_mode.pack(side="right", padx=8, pady=6)
 
+        # Screen Viewport Container
         self.canvas_container = ctk.CTkFrame(panel, fg_color="#040507", corner_radius=0)
         self.canvas_container.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
         self.canvas_container.grid_rowconfigure(0, weight=1)
@@ -481,54 +458,35 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_screen = ctk.CTkLabel(
             self.canvas_container,
-            text="🎬 Ziehe ein Video hierher oder klicke auf 'Video importieren'\num das RTX-Remastering in Echtzeit zu sehen.",
+            text="🎬 Importiere ein Video, um das gesamte Video im Player anzusehen.\nDrücke [Leertaste] zum Abspielen/Pausieren.",
             font=ctk.CTkFont(size=12),
             text_color="#475569"
         )
         self.lbl_screen.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
 
+        # Bottom Transport Bar
         transport_bar = ctk.CTkFrame(panel, fg_color="#12161d", height=40, corner_radius=0)
         transport_bar.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
 
         self.lbl_timecode = ctk.CTkLabel(
             transport_bar,
-            text="00:00:00:00 / 00:00:10:00",
+            text="00:00:00:00 / 00:00:00:00",
             font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
             text_color="#00e5ff"
         )
         self.lbl_timecode.pack(side="left", padx=12, pady=6)
 
-        transport_controls = ctk.CTkFrame(transport_bar, fg_color="transparent")
-        transport_controls.pack(side="left", expand=True)
+        # Transport Controls
+        controls = ctk.CTkFrame(transport_bar, fg_color="transparent")
+        controls.pack(side="left", expand=True)
 
-        btn_start = ctk.CTkButton(
-            transport_controls,
-            text="⏮",
-            width=28,
-            height=26,
-            font=ctk.CTkFont(size=11),
-            fg_color="#1a222c",
-            hover_color="#283444",
-            command=self._rewind_to_start
-        )
-        btn_start.pack(side="left", padx=2)
-
-        btn_prev_frame = ctk.CTkButton(
-            transport_controls,
-            text="◀",
-            width=28,
-            height=26,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1a222c",
-            hover_color="#283444",
-            command=self._step_frame_back
-        )
-        btn_prev_frame.pack(side="left", padx=2)
+        ctk.CTkButton(controls, text="⏮", width=28, height=26, font=ctk.CTkFont(size=11), fg_color="#1a222c", hover_color="#283444", command=self._rewind_to_start).pack(side="left", padx=2)
+        ctk.CTkButton(controls, text="◀", width=28, height=26, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=lambda: self._step_time(-1.0)).pack(side="left", padx=2)
 
         self.btn_play_pause = ctk.CTkButton(
-            transport_controls,
+            controls,
             text="▶",
-            width=42,
+            width=44,
             height=28,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#00c4cc",
@@ -539,228 +497,107 @@ class LuxanixDesktopApp(ctk.CTk):
         )
         self.btn_play_pause.pack(side="left", padx=6)
 
-        btn_next_frame = ctk.CTkButton(
-            transport_controls,
-            text="▶",
-            width=28,
-            height=26,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1a222c",
-            hover_color="#283444",
-            command=self._step_frame_forward
-        )
-        btn_next_frame.pack(side="left", padx=2)
+        ctk.CTkButton(controls, text="▶", width=28, height=26, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=lambda: self._step_time(+1.0)).pack(side="left", padx=2)
+        ctk.CTkButton(controls, text="⏭", width=28, height=26, font=ctk.CTkFont(size=11), fg_color="#1a222c", hover_color="#283444", command=self._seek_to_end).pack(side="left", padx=2)
 
-        btn_end = ctk.CTkButton(
-            transport_controls,
-            text="⏭",
-            width=28,
-            height=26,
-            font=ctk.CTkFont(size=11),
-            fg_color="#1a222c",
-            hover_color="#283444",
-            command=self._seek_to_end
-        )
-        btn_end.pack(side="left", padx=2)
-
-        self.btn_gen_preview = ctk.CTkButton(
+        # Playback Speed selector
+        self.opt_speed = ctk.CTkOptionMenu(
             transport_bar,
-            text="⚡ Vorschau rendern",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#1e3a5f",
-            hover_color="#274d7e",
-            text_color="#60a5fa",
-            width=130,
-            height=26,
-            corner_radius=4,
-            command=self._generate_video_preview
+            values=["0.5x", "1.0x", "1.5x", "2.0x"],
+            width=70,
+            height=24,
+            font=ctk.CTkFont(size=10),
+            command=self._on_speed_change
         )
-        self.btn_gen_preview.pack(side="right", padx=10, pady=6)
+        self.opt_speed.set("1.0x")
+        self.opt_speed.pack(side="right", padx=10, pady=6)
 
-    # 2C. RIGHT INSPECTOR
-    def _build_right_inspector_panel(self):
+    # 2C. RIGHT INSPECTOR (CLIP & HARDWARE DETAILS)
+    def _build_right_inspector(self):
         panel = ctk.CTkFrame(self.workspace, fg_color="#10141a", corner_radius=6, border_width=1, border_color="#1a202a")
         panel.grid(row=0, column=2, sticky="nsew", padx=(4, 0), pady=0)
         panel.grid_rowconfigure(0, weight=1)
         panel.grid_columnconfigure(0, weight=1)
 
-        self.insp_tabview = ctk.CTkTabview(
-            panel,
-            fg_color="transparent",
-            segmented_button_fg_color="#161c24",
-            segmented_button_selected_color="#00c4cc",
-            segmented_button_selected_hover_color="#009ea5",
-            segmented_button_unselected_color="#161c24",
-            segmented_button_unselected_hover_color="#202935",
-            text_color="#ffffff",
-            height=36
+        scroll = ctk.CTkScrollableFrame(panel, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+
+        ctk.CTkLabel(scroll, text="✂️ Clip-Inspektor", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=4, pady=(4, 6))
+
+        self.lbl_clip_stat = ctk.CTkLabel(
+            scroll,
+            text="Ausgewähltes Segment: 1\nStart: 0.0s | Ende: 10.0s\nDauer: 10.0s",
+            font=ctk.CTkFont(size=10),
+            text_color="#cbd5e1",
+            justify="left"
         )
-        self.insp_tabview.grid(row=0, column=0, sticky="nsew", padx=6, pady=(4, 6))
+        self.lbl_clip_stat.pack(anchor="w", padx=6, pady=4)
 
-        tab_rt = self.insp_tabview.add("Raytracing")
-        tab_hw = self.insp_tabview.add("Hardware")
-        tab_light = self.insp_tabview.add("Belichtung")
-        tab_exp = self.insp_tabview.add("8K Export")
-
-        # TAB: RAYTRACING
-        scroll_rt = ctk.CTkScrollableFrame(tab_rt, fg_color="transparent")
-        scroll_rt.pack(fill="both", expand=True, padx=2, pady=2)
-
-        ctk.CTkLabel(scroll_rt, text="NVIDIA Tensor RTX Shader", font=ctk.CTkFont(size=11, weight="bold"), text_color="#76b900").pack(anchor="w", padx=4, pady=(2, 4))
-        self.slider_rtgi = self._create_slider(scroll_rt, "RTGI Streulicht (Bounce)", 0.0, 1.5, 0.65)
-        self.slider_ssr = self._create_slider(scroll_rt, "SSR Spiegelungen (Asphalt)", 0.0, 1.5, 0.55)
-        self.slider_rtao = self._create_slider(scroll_rt, "RTAO Kontaktschatten", 0.0, 1.5, 0.60)
-        self.slider_clarity = self._create_slider(scroll_rt, "Detail-Clarity (Anti-TAA)", 0.0, 1.0, 0.35)
-        self.slider_wetness = self._create_slider(scroll_rt, "Oberflächen-Nässe / Glanz", 0.0, 1.5, 0.50)
-
-        # TAB: HARDWARE
-        scroll_hw = ctk.CTkScrollableFrame(tab_hw, fg_color="transparent")
-        scroll_hw.pack(fill="both", expand=True, padx=2, pady=2)
-
-        ctk.CTkLabel(scroll_hw, text="GPU-Architektur & Hardware-Profil", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=4, pady=(2, 4))
-
-        self.profile_map = {
-            "🔥 RTX 50 Blackwell (Hyper-PT & 8K)": "blackwell",
-            "⚡ RTX 40 Ada Lovelace (Ultra Quality)": "ultra",
-            "⚡ RTX 30 Ampere (Ausgewogen)": "balanced",
-            "🌱 RTX 20 Turing (Low-VRAM Saver)": "low_vram",
-        }
-        rec_key = getattr(self.gpu_info, "recommended_profile", "ultra")
-        default_label = next((k for k, v in self.profile_map.items() if v == rec_key), "🔥 RTX 50 Blackwell (Hyper-PT & 8K)")
-
-        self.opt_arch = ctk.CTkOptionMenu(
-            scroll_hw,
-            values=list(self.profile_map.keys()),
-            command=self._on_arch_profile_change
+        btn_split_inspector = ctk.CTkButton(
+            scroll,
+            text="✂️ Clip hier teilen (Strg+B)",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#1e293b",
+            hover_color="#334155",
+            command=self._split_clip_at_playhead
         )
-        self.opt_arch.set(default_label)
-        self.opt_arch.pack(fill="x", padx=4, pady=4)
+        btn_split_inspector.pack(fill="x", padx=4, pady=3)
 
-        card_hw_info = ctk.CTkFrame(scroll_hw, fg_color="#151b22", corner_radius=6)
-        card_hw_info.pack(fill="x", padx=4, pady=8)
+        btn_del_inspector = ctk.CTkButton(
+            scroll,
+            text="🗑️ Segment löschen (Entf)",
+            font=ctk.CTkFont(size=11),
+            fg_color="#27181c",
+            hover_color="#451e24",
+            text_color="#f87171",
+            command=self._delete_selected_segment
+        )
+        btn_del_inspector.pack(fill="x", padx=4, pady=3)
+
+        btn_reset_inspector = ctk.CTkButton(
+            scroll,
+            text="↩️ Schnitte zurücksetzen",
+            font=ctk.CTkFont(size=10),
+            fg_color="#1e242d",
+            hover_color="#2b3442",
+            command=self._reset_cuts
+        )
+        btn_reset_inspector.pack(fill="x", padx=4, pady=3)
+
+        # Hardware & Export Info
+        ctk.CTkLabel(scroll, text="⚡ Hardware & RTX 50", font=ctk.CTkFont(size=11, weight="bold"), text_color="#76b900").pack(anchor="w", padx=4, pady=(12, 4))
+        card_hw = ctk.CTkFrame(scroll, fg_color="#151b22", corner_radius=6)
+        card_hw.pack(fill="x", padx=2, pady=4)
 
         gpu_name = getattr(self.gpu_info, "device_name", "NVIDIA RTX")
-        vram_gb = getattr(self.gpu_info, "vram_gb", 12.0)
-
-        ctk.CTkLabel(card_hw_info, text="Hardware-Diagnose:", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=8, pady=(6, 2))
-        ctk.CTkLabel(card_hw_info, text=f"• GPU: {gpu_name}", font=ctk.CTkFont(size=9), text_color="#94a3b8").pack(anchor="w", padx=8)
-        ctk.CTkLabel(card_hw_info, text=f"• VRAM: {vram_gb:.1f} GB GDDR6X", font=ctk.CTkFont(size=9), text_color="#94a3b8").pack(anchor="w", padx=8)
-        ctk.CTkLabel(card_hw_info, text="• Tensor Cores: Gen 3/4/5 Aktiv", font=ctk.CTkFont(size=9), text_color="#76b900").pack(anchor="w", padx=8)
-        ctk.CTkLabel(card_hw_info, text="• Dual-NVENC AV1: Bereit", font=ctk.CTkFont(size=9), text_color="#00c4cc").pack(anchor="w", padx=8, pady=(0, 6))
-
-        # TAB: BELICHTUNG
-        scroll_light = ctk.CTkScrollableFrame(tab_light, fg_color="transparent")
-        scroll_light.pack(fill="both", expand=True, padx=2, pady=2)
-
-        ctk.CTkLabel(scroll_light, text="Dynamische Szenen-Parameter", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=4, pady=(2, 4))
-        self.slider_exposure = self._create_slider(scroll_light, "Belichtung (Exposure EV)", -1.5, 1.5, 0.05)
-        self.slider_contrast = self._create_slider(scroll_light, "Kontrast (S-Kurve)", 0.6, 1.8, 1.12)
-        self.slider_bloom = self._create_slider(scroll_light, "Scheinwerfer-Bloom", 0.0, 1.0, 0.30)
-        self.slider_grain = self._create_slider(scroll_light, "Filmkorn (Anti-Banding)", 0.0, 0.3, 0.08)
-
-        # TAB: 8K EXPORT
-        scroll_exp = ctk.CTkScrollableFrame(tab_exp, fg_color="transparent")
-        scroll_exp.pack(fill="both", expand=True, padx=2, pady=2)
-
-        ctk.CTkLabel(scroll_exp, text="Export-Auflösung", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=4, pady=(2, 2))
-        self.combo_res = ctk.CTkComboBox(
-            scroll_exp,
-            values=["Original", "1080p Full HD", "1440p 2K QHD", "4K Ultra HD (2160p)", "8K Ultra HD (4320p)"]
-        )
-        self.combo_res.set("Original")
-        self.combo_res.pack(fill="x", padx=4, pady=(0, 6))
-
-        ctk.CTkLabel(scroll_exp, text="Hardware-Encoder Codec", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=4, pady=(2, 2))
-        self.combo_codec = ctk.CTkComboBox(
-            scroll_exp,
-            values=[
-                "AV1 (NVIDIA RTX 50 & 40 Dual-NVENC)",
-                "HEVC / H.265 (NVIDIA NVENC 4K/8K)",
-                "H.264 (NVIDIA NVENC)",
-                "libx264 (CPU Fallback)"
-            ]
-        )
-        self.combo_codec.set("AV1 (NVIDIA RTX 50 & 40 Dual-NVENC)")
-        self.combo_codec.pack(fill="x", padx=4, pady=(0, 6))
-
-        self.slider_bitrate = self._create_slider(scroll_exp, "Bitrate (Mbps) — für 8K 80-120 Mbps", 10, 160, 60)
-
-        btn_start_render = ctk.CTkButton(
-            scroll_exp,
-            text="🚀 Video Rendern & Speichern",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color="#00c4cc",
-            hover_color="#009ea5",
-            text_color="#000000",
-            height=36,
-            command=self._start_full_render
-        )
-        btn_start_render.pack(fill="x", padx=4, pady=10)
+        vram = getattr(self.gpu_info, "vram_gb", 12.0)
+        ctk.CTkLabel(card_hw, text=f"• GPU: {gpu_name}", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w", padx=8, pady=(6, 1))
+        ctk.CTkLabel(card_hw, text=f"• VRAM: {vram:.1f} GB GDDR6X", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w", padx=8, pady=1)
+        ctk.CTkLabel(card_hw, text="• Tensor Cores: Gen 3/4/5 FP16", font=ctk.CTkFont(size=10), text_color="#76b900").pack(anchor="w", padx=8, pady=1)
+        ctk.CTkLabel(card_hw, text="• Dual-NVENC AV1/HEVC: Bereit", font=ctk.CTkFont(size=10), text_color="#00c4cc").pack(anchor="w", padx=8, pady=(1, 6))
 
     # 3. BOTTOM MULTI-TRACK TIMELINE
-    def _build_timeline_panel(self):
+    def _build_bottom_timeline(self):
         self.timeline_panel = ctk.CTkFrame(self, fg_color="#0e1217", corner_radius=0, border_width=1, border_color="#181e26")
         self.timeline_panel.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
         self.timeline_panel.grid_rowconfigure(2, weight=1)
         self.timeline_panel.grid_columnconfigure(1, weight=1)
 
+        # 3A. Toolbar
         toolbar = ctk.CTkFrame(self.timeline_panel, fg_color="#12161d", height=32, corner_radius=0)
         toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
 
         tools_left = ctk.CTkFrame(toolbar, fg_color="transparent")
         tools_left.pack(side="left", padx=8, pady=3)
 
-        btn_split = ctk.CTkButton(
-            tools_left,
-            text="✂️ Teilen (Strg+B)",
-            width=100,
-            height=24,
-            font=ctk.CTkFont(size=10, weight="bold"),
-            fg_color="#1a222c",
-            hover_color="#283444",
-            command=self._on_split_clip
-        )
-        btn_split.pack(side="left", padx=2)
-
-        btn_trim_in = ctk.CTkButton(
-            tools_left,
-            text="⏮ Start trimmen",
-            width=90,
-            height=24,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1a222c",
-            hover_color="#283444",
-            command=self._trim_start_at_playhead
-        )
-        btn_trim_in.pack(side="left", padx=2)
-
-        btn_trim_out = ctk.CTkButton(
-            tools_left,
-            text="⏭ Ende trimmen",
-            width=90,
-            height=24,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1a222c",
-            hover_color="#283444",
-            command=self._trim_end_at_playhead
-        )
-        btn_trim_out.pack(side="left", padx=2)
-
-        btn_del = ctk.CTkButton(
-            tools_left,
-            text="🗑️ Löschen",
-            width=70,
-            height=24,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1a222c",
-            hover_color="#3e2025",
-            command=self._reset_trim
-        )
-        btn_del.pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="✂️ Teilen (Strg+B)", width=95, height=24, font=ctk.CTkFont(size=10, weight="bold"), fg_color="#1a222c", hover_color="#283444", command=self._split_clip_at_playhead).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="🗑️ Löschen (Entf)", width=95, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#3e2025", command=self._delete_selected_segment).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="⏮ Start trimmen", width=85, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._trim_start_at_playhead).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="⏭ Ende trimmen", width=85, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._trim_end_at_playhead).pack(side="left", padx=2)
 
         self.lbl_timeline_summary = ctk.CTkLabel(
             toolbar,
-            text="Clip-Schnittbereich: 0.0s – 10.0s (Gesamtlänge)",
+            text="Timeline: 1 Clip | Gesamtlänge: 0.0s",
             font=ctk.CTkFont(size=10),
             text_color="#94a3b8"
         )
@@ -768,18 +605,13 @@ class LuxanixDesktopApp(ctk.CTk):
 
         tools_right = ctk.CTkFrame(toolbar, fg_color="transparent")
         tools_right.pack(side="right", padx=8, pady=3)
-
         ctk.CTkLabel(tools_right, text="🧲 Magnet: An", font=ctk.CTkFont(size=10), text_color="#00c4cc").pack(side="left", padx=6)
-        ctk.CTkLabel(tools_right, text="🔍 Zoom:", font=ctk.CTkFont(size=10), text_color="#64748b").pack(side="left", padx=2)
 
-        self.slider_zoom = ctk.CTkSlider(tools_right, from_=1.0, to=4.0, width=80, height=14)
-        self.slider_zoom.set(1.0)
-        self.slider_zoom.pack(side="left", padx=4)
-
-        header_col = ctk.CTkFrame(self.timeline_panel, fg_color="#10141a", width=70, corner_radius=0)
+        # 3B. Track Headers & Ruler Canvas
+        header_col = ctk.CTkFrame(self.timeline_panel, fg_color="#10141a", width=68, corner_radius=0)
         header_col.grid(row=1, column=0, rowspan=2, sticky="nsew", padx=0, pady=0)
 
-        ctk.CTkLabel(header_col, text="TRACKS", font=ctk.CTkFont(size=9, weight="bold"), text_color="#64748b").pack(pady=4)
+        ctk.CTkLabel(header_col, text="SPUREN", font=ctk.CTkFont(size=9, weight="bold"), text_color="#64748b").pack(pady=4)
         ctk.CTkLabel(header_col, text="🎬 V1\nVideo", font=ctk.CTkFont(size=10, weight="bold"), text_color="#00c4cc").pack(pady=10)
         ctk.CTkLabel(header_col, text="⚡ FX\nShader", font=ctk.CTkFont(size=10, weight="bold"), text_color="#a855f7").pack(pady=6)
         ctk.CTkLabel(header_col, text="🔊 A1\nAudio", font=ctk.CTkFont(size=10, weight="bold"), text_color="#10b981").pack(pady=8)
@@ -795,135 +627,8 @@ class LuxanixDesktopApp(ctk.CTk):
         self.canvas_timeline.bind("<Button-1>", self._on_timeline_click)
         self.canvas_timeline.bind("<B1-Motion>", self._on_timeline_drag)
 
-    def _draw_timeline(self):
-        w = self.canvas_timeline.winfo_width()
-        h = self.canvas_timeline.winfo_height()
-        if w < 50 or h < 50:
-            return
-
-        self.canvas_timeline.delete("all")
-
-        self.canvas_timeline.create_rectangle(0, 0, w, 24, fill="#12171e", outline="#1c2430")
-
-        dur = self.video_info.get("duration", 10.0) or 10.0
-        dur = max(dur, 1.0)
-
-        num_ticks = min(int(dur) + 1, 30)
-        step_px = w / dur
-        for sec in range(num_ticks):
-            x = sec * step_px
-            if x > w:
-                break
-            self.canvas_timeline.create_line(x, 14, x, 24, fill="#475569")
-            time_str = f"00:{sec:02d}"
-            self.canvas_timeline.create_text(x + 14, 8, text=time_str, fill="#94a3b8", font=("Segoe UI", 8))
-
-        self.canvas_timeline.create_rectangle(0, 28, w, 84, fill="#11161d", outline="#1c2430")
-
-        clip_start_x = (self.trim_start_sec / dur) * w
-        clip_end_x = (self.trim_end_sec / dur) * w
-        clip_end_x = max(clip_end_x, clip_start_x + 30)
-
-        self.canvas_timeline.create_rectangle(
-            clip_start_x, 32, clip_end_x, 80,
-            fill="#16232e", outline="#00c4cc", width=1.5
-        )
-
-        title = os.path.basename(self.video_path) if self.video_path else "Assetto_Corsa_Gameplay.mp4"
-        self.canvas_timeline.create_text(
-            clip_start_x + 10, 44,
-            text=f"🎬 {title} [1080p60 -> 8K Remaster]",
-            anchor="w",
-            fill="#e2e8f0",
-            font=("Segoe UI", 9, "bold")
-        )
-
-        num_thumbs = max(2, int((clip_end_x - clip_start_x) / 75))
-        box_w = (clip_end_x - clip_start_x) / num_thumbs
-        for i in range(num_thumbs):
-            bx = clip_start_x + i * box_w
-            self.canvas_timeline.create_rectangle(
-                bx + 2, 54, bx + box_w - 2, 76,
-                fill="#1e2c3a", outline="#293b4d"
-            )
-            self.canvas_timeline.create_text(
-                bx + (box_w / 2), 65,
-                text=f"Frame {(i + 1) * 30}",
-                fill="#64748b",
-                font=("Segoe UI", 7)
-            )
-
-        self.canvas_timeline.create_rectangle(0, 88, w, 118, fill="#11161d", outline="#1c2430")
-        self.canvas_timeline.create_rectangle(
-            clip_start_x, 92, clip_end_x, 114,
-            fill="#271838", outline="#a855f7", width=1.5
-        )
-        self.canvas_timeline.create_text(
-            clip_start_x + 10, 103,
-            text="✨ RTX 50 Hyper-Path Tracing + SSR & Auto-Scene Dynamic Optimizer (Aktiv)",
-            anchor="w",
-            fill="#d8b4fe",
-            font=("Segoe UI", 8, "bold")
-        )
-
-        self.canvas_timeline.create_rectangle(0, 122, w, 152, fill="#11161d", outline="#1c2430")
-        self.canvas_timeline.create_rectangle(
-            clip_start_x, 125, clip_end_x, 149,
-            fill="#12251d", outline="#10b981", width=1
-        )
-        step_wave = 5
-        wave_pts = int((clip_end_x - clip_start_x) / step_wave)
-        for i in range(wave_pts):
-            wx = clip_start_x + i * step_wave
-            amp = np.sin(i * 0.4) * 8 + np.cos(i * 0.9) * 4
-            self.canvas_timeline.create_line(
-                wx, 137 - abs(amp), wx, 137 + abs(amp),
-                fill="#34d399", width=1.5
-            )
-
-        playhead_x = (self.playhead_pos_pct / 100.0) * w
-        self.canvas_timeline.create_line(playhead_x, 0, playhead_x, h, fill="#00e5ff", width=2)
-        self.canvas_timeline.create_polygon(
-            playhead_x - 6, 0,
-            playhead_x + 6, 0,
-            playhead_x + 6, 12,
-            playhead_x, 18,
-            playhead_x - 6, 12,
-            fill="#00e5ff", outline="#ffffff"
-        )
-
-    def _on_timeline_click(self, event):
-        w = self.canvas_timeline.winfo_width()
-        if w <= 0:
-            return
-        pct = max(0.0, min(100.0, (event.x / w) * 100.0))
-        self.playhead_pos_pct = pct
-        self._sync_playhead_to_player()
-        self._draw_timeline()
-
-    def _on_timeline_drag(self, event):
-        self._on_timeline_click(event)
-
-    def _sync_playhead_to_player(self):
-        dur = self.video_info.get("duration", 10.0) or 10.0
-        curr_sec = (self.playhead_pos_pct / 100.0) * dur
-        m = int(curr_sec // 60)
-        s = int(curr_sec % 60)
-        f = int((curr_sec - int(curr_sec)) * 30)
-
-        dur_m = int(dur // 60)
-        dur_s = int(dur % 60)
-        dur_f = int((dur - int(dur)) * 30)
-
-        self.lbl_timecode.configure(text=f"{m:02d}:{s:02d}:{f:02d} / {dur_m:02d}:{dur_s:02d}:{dur_f:02d}")
-
-        if self.preview_frames_cache:
-            idx = int((self.playhead_pos_pct / 100.0) * len(self.preview_frames_cache))
-            self.playback_idx = max(0, min(len(self.preview_frames_cache) - 1, idx))
-            self._render_current_cached_frame()
-
-    # 4. BOTTOM-MOST STATUS BAR
-    def _build_status_bar(self):
+    # 4. BOTTOM STATUS BAR
+    def _build_bottom_statusbar(self):
         self.bottom_bar = ctk.CTkFrame(self, fg_color="#090b0e", height=38, corner_radius=0)
         self.bottom_bar.grid(row=3, column=0, sticky="ew", padx=0, pady=0)
 
@@ -942,7 +647,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_status = ctk.CTkLabel(
             status_row,
-            text="Bereit. Importiere ein Video oder wähle ein Preset, um den RTX-Remaster zu starten.",
+            text="Bereit. Importiere ein Video oder drücke Leertaste zur Vollvideo-Wiedergabe.",
             font=ctk.CTkFont(size=10),
             text_color="#94a3b8"
         )
@@ -950,421 +655,399 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.lbl_eta = ctk.CTkLabel(
             status_row,
-            text="⚡ NVIDIA RTX 50 Ready | FP16 Tensor Cores",
+            text="⚡ Autonome RTX Physik-Engine Aktiv",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#76b900"
         )
         self.lbl_eta.pack(side="right")
 
-    # LOGIC
-    def _create_slider(self, parent, label_text, min_val, max_val, default_val):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", padx=4, pady=2)
-
-        lbl = ctk.CTkLabel(frame, text=f"{label_text}: {default_val:.2f}", font=ctk.CTkFont(size=10), text_color="#cbd5e1")
-        lbl.pack(anchor="w")
-
-        slider = ctk.CTkSlider(
-            frame,
-            from_=min_val,
-            to=max_val,
-            number_of_steps=100,
-            button_color="#00c4cc",
-            button_hover_color="#009ea5",
-            progress_color="#00c4cc"
-        )
-        slider.set(default_val)
-        slider.pack(fill="x", pady=(1, 3))
-
-        def on_change(val):
-            lbl.configure(text=f"{label_text}: {float(val):.2f}")
-            if not self.is_playing and self.video_path:
-                self._generate_first_frame_preview()
-        slider.configure(command=on_change)
-        return slider
-
-    def _choose_video(self):
-        file_path = filedialog.askopenfilename(
-            title="Wähle ein Gameplay- oder Simracing-Video",
-            filetypes=[("Video-Dateien", "*.mp4 *.mkv *.avi *.mov *.webm"), ("Alle Dateien", "*.*")]
-        )
-        if not file_path:
+    # =========================================================================
+    # TIMELINE DRAWING & INTERACTION
+    # =========================================================================
+    def _draw_timeline(self):
+        w = self.canvas_timeline.winfo_width()
+        h = self.canvas_timeline.winfo_height()
+        if w < 50 or h < 50:
             return
 
-        self.video_path = file_path
-        self.video_info = get_video_info(file_path)
+        self.canvas_timeline.delete("all")
 
-        w = self.video_info.get("width", 1920)
-        h = self.video_info.get("height", 1080)
-        fps = self.video_info.get("fps", 60.0)
-        dur = self.video_info.get("duration", 0.0)
-        frames = self.video_info.get("total_frames", 0)
-        aspect = self.video_info.get("aspect_ratio", "16:9")
+        dur = max(self.total_duration_sec, 1.0)
 
-        self.lbl_clip_title.configure(text=f"📄 {os.path.basename(file_path)}")
-        self.lbl_clip_details.configure(
-            text=f"Auflösung: {w}x{h} ({aspect}) | {fps:.1f} FPS\nDauer: {dur:.1f}s ({frames} Frames)"
-        )
-        self.lbl_media_status.configure(text=f"✅ Geladen: {os.path.basename(file_path)}")
+        # 1. Ruler
+        self.canvas_timeline.create_rectangle(0, 0, w, 24, fill="#12171e", outline="#1c2430")
+        step_px = max(20.0, w / dur)
+        num_ticks = min(int(dur) + 1, 40)
+        for sec in range(0, int(dur) + 1, max(1, int(dur // 20))):
+            x = (sec / dur) * w
+            self.canvas_timeline.create_line(x, 14, x, 24, fill="#475569")
+            m = sec // 60
+            s = sec % 60
+            self.canvas_timeline.create_text(x + 14, 8, text=f"{m:02d}:{s:02d}", fill="#94a3b8", font=("Segoe UI", 8))
 
-        self.trim_start_sec = 0.0
-        self.trim_end_sec = min(dur, 10.0) if dur > 0 else 10.0
-        self.lbl_timeline_summary.configure(
-            text=f"Clip-Schnittbereich: {self.trim_start_sec:.1f}s – {self.trim_end_sec:.1f}s (Dauer: {self.trim_end_sec - self.trim_start_sec:.1f}s)"
-        )
+        # 2. Track 1: Video Segments
+        self.canvas_timeline.create_rectangle(0, 28, w, 84, fill="#11161d", outline="#1c2430")
 
-        self._draw_timeline()
-        self._generate_first_frame_preview()
-
-    def _apply_preset_by_name(self, choice):
-        if choice in self.presets_data:
-            p = self.presets_data[choice]
-            if "rtgi_intensity" in p: self.slider_rtgi.set(p["rtgi_intensity"])
-            if "ssr_intensity" in p: self.slider_ssr.set(p["ssr_intensity"])
-            if "rtao_intensity" in p: self.slider_rtao.set(p["rtao_intensity"])
-            if "clarity" in p: self.slider_clarity.set(p["clarity"])
-            if "exposure" in p: self.slider_exposure.set(p["exposure"])
-            if "contrast" in p: self.slider_contrast.set(p["contrast"])
-            if "bloom_intensity" in p: self.slider_bloom.set(p["bloom_intensity"])
-            if "film_grain" in p: self.slider_grain.set(p["film_grain"])
-
-            if "RTX 50" in choice or "Blackwell" in choice:
-                self.opt_arch.set("🔥 RTX 50 Blackwell (Hyper-PT & 8K)")
-                self._on_arch_profile_change("🔥 RTX 50 Blackwell (Hyper-PT & 8K)")
-
-            self.lbl_status.configure(text=f"Preset '{choice}' angewendet!")
-            self._generate_first_frame_preview()
-
-    def _on_arch_profile_change(self, choice):
-        profile_key = self.profile_map.get(choice, "ultra")
-        self.current_profile_key = profile_key
-        settings = get_profile_settings(profile_key)
-        if profile_key == "blackwell":
-            self.lbl_status.configure(
-                text="🔥 RTX 50 Blackwell aktiv: 18 RTGI Bounces, 24 SSR Steps, 12 RTAO Samples & AV1 Dual-NVENC."
-            )
-            self.combo_codec.set("AV1 (NVIDIA RTX 50 & 40 Dual-NVENC)")
-        elif profile_key == "ultra":
-            self.lbl_status.configure(text="⚡ RTX 40 / Ultra Profil aktiv (12 RTGI / 16 SSR / HEVC).")
-            self.combo_codec.set("HEVC / H.265 (NVIDIA NVENC 4K/8K)")
-        elif profile_key == "balanced":
-            self.lbl_status.configure(text="⚡ RTX 30 Balanced Profil aktiv (10 RTGI / 12 SSR).")
-            self.combo_codec.set("HEVC / H.265 (NVIDIA NVENC 4K/8K)")
-        elif profile_key == "low_vram":
-            self.lbl_status.configure(text="🌱 RTX 20 Low-VRAM Profil aktiv (6 RTGI / 8 SSR / Memory-Saver).")
-            self.combo_codec.set("H.264 (NVIDIA NVENC)")
-
-    def _on_auto_preset_toggle(self):
-        is_auto = bool(self.sw_auto_preset.get())
-        if is_auto:
-            self.lbl_ai_metrics.configure(text="⚡ Status: Frame-Analyse Aktiv (16ms Latenz)", text_color="#34d399")
+        if not self.timeline_segments:
+            segments = [{"start": 0.0, "end": dur, "title": "Clip 1"}]
         else:
-            self.lbl_ai_metrics.configure(text="⚡ Status: Deaktiviert (Manuelle Slider aktiv)", text_color="#f87171")
+            segments = self.timeline_segments
+
+        for idx, seg in enumerate(segments):
+            seg_x1 = (seg["start"] / dur) * w
+            seg_x2 = (seg["end"] / dur) * w
+            is_sel = (idx == self.selected_segment_idx)
+
+            outline_col = "#00e5ff" if is_sel else "#008b94"
+            fill_col = "#1b2c3a" if is_sel else "#14212c"
+
+            # Clip box
+            self.canvas_timeline.create_rectangle(
+                seg_x1, 32, seg_x2, 80,
+                fill=fill_col, outline=outline_col, width=2 if is_sel else 1
+            )
+
+            # Segment Title & Duration
+            seg_dur = seg["end"] - seg["start"]
+            title_text = f"🎬 {seg.get('title', f'Clip {idx+1}')} ({seg_dur:.1f}s)"
+            self.canvas_timeline.create_text(
+                seg_x1 + 8, 44,
+                text=title_text,
+                anchor="w",
+                fill="#ffffff" if is_sel else "#cbd5e1",
+                font=("Segoe UI", 9, "bold")
+            )
+
+            # Miniature preview blocks
+            box_count = max(1, int((seg_x2 - seg_x1) / 60))
+            bw = (seg_x2 - seg_x1) / box_count
+            for bi in range(box_count):
+                bx = seg_x1 + bi * bw
+                self.canvas_timeline.create_rectangle(
+                    bx + 2, 54, bx + bw - 2, 76,
+                    fill="#243445" if is_sel else "#1b2633",
+                    outline="#2f4255"
+                )
+
+        # 3. Track 2: AI Shader Track
+        self.canvas_timeline.create_rectangle(0, 88, w, 118, fill="#11161d", outline="#1c2430")
+        for seg in segments:
+            seg_x1 = (seg["start"] / dur) * w
+            seg_x2 = (seg["end"] / dur) * w
+            self.canvas_timeline.create_rectangle(
+                seg_x1, 92, seg_x2, 114,
+                fill="#271838", outline="#a855f7", width=1.5
+            )
+            self.canvas_timeline.create_text(
+                seg_x1 + 8, 103,
+                text="⚡ Autonome RTX Physik-Engine (SSR + RTGI + RTAO)",
+                anchor="w",
+                fill="#d8b4fe",
+                font=("Segoe UI", 8, "bold")
+            )
+
+        # 4. Track 3: Audio Waveform
+        self.canvas_timeline.create_rectangle(0, 122, w, 152, fill="#11161d", outline="#1c2430")
+        for seg in segments:
+            seg_x1 = (seg["start"] / dur) * w
+            seg_x2 = (seg["end"] / dur) * w
+            self.canvas_timeline.create_rectangle(
+                seg_x1, 125, seg_x2, 149,
+                fill="#12251d", outline="#10b981", width=1
+            )
+            wave_pts = int((seg_x2 - seg_x1) / 5)
+            for i in range(wave_pts):
+                wx = seg_x1 + i * 5
+                amp = np.sin((seg["start"] + i * 0.1) * 2.0) * 8 + np.cos(i * 0.8) * 4
+                self.canvas_timeline.create_line(
+                    wx, 137 - abs(amp), wx, 137 + abs(amp),
+                    fill="#34d399", width=1.5
+                )
+
+        # 5. Playhead Needle
+        playhead_x = (self.current_time_sec / dur) * w
+        self.canvas_timeline.create_line(playhead_x, 0, playhead_x, h, fill="#00e5ff", width=2)
+        self.canvas_timeline.create_polygon(
+            playhead_x - 6, 0,
+            playhead_x + 6, 0,
+            playhead_x + 6, 12,
+            playhead_x, 18,
+            playhead_x - 6, 12,
+            fill="#00e5ff", outline="#ffffff"
+        )
+
+    def _on_timeline_click(self, event):
+        w = self.canvas_timeline.winfo_width()
+        if w <= 0 or self.total_duration_sec <= 0:
+            return
+        target_sec = max(0.0, min(self.total_duration_sec, (event.x / w) * self.total_duration_sec))
+        self.current_time_sec = target_sec
+        self._seek_to_time(target_sec)
+        self._draw_timeline()
+
+    def _on_timeline_drag(self, event):
+        self._on_timeline_click(event)
+
+    # =========================================================================
+    # NLE CUTTING & EDITING ACTIONS (SPLIT, DELETE, TRIM)
+    # =========================================================================
+    def _split_clip_at_playhead(self):
+        """Splits the clip segment under the playhead into two distinct clips (Ctrl+B)."""
+        if not self.timeline_segments:
+            return
+
+        t = self.current_time_sec
+        for i, seg in enumerate(self.timeline_segments):
+            if seg["start"] + 0.3 < t < seg["end"] - 0.3:
+                # Split this segment!
+                seg1 = {"start": seg["start"], "end": t, "title": f"Clip {i+1}A"}
+                seg2 = {"start": t, "end": seg["end"], "title": f"Clip {i+1}B"}
+                self.timeline_segments[i] = seg1
+                self.timeline_segments.insert(i + 1, seg2)
+                self.selected_segment_idx = i + 1
+                self.lbl_status.configure(text=f"✂️ Clip bei {t:.1f}s geteilt! Neue Segmente: {len(self.timeline_segments)}")
+                self._update_timeline_stats()
+                self._draw_timeline()
+                return
+
+    def _delete_selected_segment(self):
+        """Deletes the currently selected segment from the timeline (Del)."""
+        if len(self.timeline_segments) <= 1:
+            messagebox.showinfo("Info", "Es muss mindestens ein Clip auf der Timeline verbleiben.")
+            return
+
+        idx = self.selected_segment_idx
+        if 0 <= idx < len(self.timeline_segments):
+            del self.timeline_segments[idx]
+            self.selected_segment_idx = max(0, min(len(self.timeline_segments) - 1, idx))
+            self.lbl_status.configure(text="🗑️ Segment aus Timeline gelöscht!")
+            self._update_timeline_stats()
+            self._draw_timeline()
+
+    def _trim_start_at_playhead(self):
+        idx = self.selected_segment_idx
+        if 0 <= idx < len(self.timeline_segments):
+            seg = self.timeline_segments[idx]
+            if self.current_time_sec < seg["end"] - 0.3:
+                seg["start"] = self.current_time_sec
+                self._update_timeline_stats()
+                self._draw_timeline()
+
+    def _trim_end_at_playhead(self):
+        idx = self.selected_segment_idx
+        if 0 <= idx < len(self.timeline_segments):
+            seg = self.timeline_segments[idx]
+            if self.current_time_sec > seg["start"] + 0.3:
+                seg["end"] = self.current_time_sec
+                self._update_timeline_stats()
+                self._draw_timeline()
+
+    def _reset_cuts(self):
+        self.timeline_segments = [{"start": 0.0, "end": self.total_duration_sec, "title": "Gesamter Clip"}]
+        self.selected_segment_idx = 0
+        self._update_timeline_stats()
+        self._draw_timeline()
+
+    def _update_timeline_stats(self):
+        n = len(self.timeline_segments)
+        total_cut_len = sum(seg["end"] - seg["start"] for seg in self.timeline_segments)
+        self.lbl_timeline_summary.configure(text=f"Timeline: {n} Clips | Gesamtdauer des Schnitts: {total_cut_len:.1f}s")
+
+        if 0 <= self.selected_segment_idx < n:
+            s = self.timeline_segments[self.selected_segment_idx]
+            self.lbl_clip_stat.configure(
+                text=f"Ausgewähltes Segment: {self.selected_segment_idx + 1}/{n}\nStart: {s['start']:.1f}s | Ende: {s['end']:.1f}s\nDauer: {s['end'] - s['start']:.1f}s"
+            )
+
+    # =========================================================================
+    # FULL-VIDEO CONTINUOUS PLAYBACK ENGINE
+    # =========================================================================
+    def _toggle_playback(self):
+        if not self.video_path or not os.path.exists(self.video_path):
+            messagebox.showwarning("Kein Video", "Bitte wähle zuerst ein Video aus!")
+            return
+
+        self.is_playing = not self.is_playing
+        self.btn_play_pause.configure(text="⏸" if self.is_playing else "▶")
+
+        if self.is_playing:
+            self.stop_playback_flag = False
+            self.play_thread = threading.Thread(target=self._run_playback_thread, daemon=True)
+            self.play_thread.start()
+
+    def _run_playback_thread(self):
+        """Streams through the ENTIRE video continuously applying real-time RTX Photorealism."""
+        cap = cv2.VideoCapture(self.video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frame_interval = (1.0 / (fps * self.playback_speed))
+
+        target_frame = int(self.current_time_sec * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+
+        while self.is_playing and not self.stop_playback_flag:
+            t_start = time.perf_counter()
+
+            ret, frame_bgr = cap.read()
+            if not ret:
+                # Reached the end of the video! Loop back to beginning
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                self.current_time_sec = 0.0
+                continue
+
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+            # Fast preview resolution for smooth 30/60fps playback
+            ph = 540
+            pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
+            small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
+
+            # 1. Autonomous Realism Computation (No Presets!)
+            auto_params = self.auto_realism.analyze_and_compute(small_rgb, master_intensity=self.realism_intensity)
+
+            # 2. Render enhanced frame
+            if self.pipeline is not None:
+                out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
+            else:
+                out_rgb = small_rgb
+
+            # 3. Apply Split Mode
+            if self.split_view_mode == "Original":
+                disp = small_rgb
+            elif self.split_view_mode == "Depth" and 'depth' in locals():
+                h, w = depth.shape[:2]
+                comb = np.zeros((h, w * 2, 3), dtype=np.uint8)
+                comb[:, :w] = depth
+                comb[:, w:] = normals
+                disp = comb
+            elif self.split_view_mode == "Split":
+                h, w = out_rgb.shape[:2]
+                mid = w // 2
+                disp = np.copy(out_rgb)
+                disp[:, :mid] = small_rgb[:, :mid]
+                disp[:, mid-2:mid+2] = [255, 255, 255]
+            else:
+                disp = out_rgb
+
+            # Advance playhead
+            self.current_time_sec += (1.0 / fps) * self.playback_speed
+            if self.current_time_sec > self.total_duration_sec:
+                self.current_time_sec = 0.0
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+            # Update UI safely
+            curr_sec = self.current_time_sec
+            try:
+                self.after(0, lambda d=disp, t=curr_sec, p=auto_params: self._update_playback_ui(d, t, p))
+            except Exception:
+                pass
+
+            # Maintain correct video frame rate
+            t_elapsed = time.perf_counter() - t_start
+            t_sleep = max(0.001, frame_interval - t_elapsed)
+            time.sleep(t_sleep)
+
+        cap.release()
+
+    def _update_playback_ui(self, disp_img, curr_sec, auto_params):
+        self._display_image_on_screen(disp_img)
+        self._draw_timeline()
+
+        # Update Timecode
+        m = int(curr_sec // 60)
+        s = int(curr_sec % 60)
+        f = int((curr_sec - int(curr_sec)) * 30)
+        dur_m = int(self.total_duration_sec // 60)
+        dur_s = int(self.total_duration_sec % 60)
+        dur_f = int((self.total_duration_sec - int(self.total_duration_sec)) * 30)
+        self.lbl_timecode.configure(text=f"{m:02d}:{s:02d}:{f:02d} / {dur_m:02d}:{dur_s:02d}:{dur_f:02d}")
+
+        # Update Live Telemetry
+        self.lbl_telem_exp.configure(text=f"• Belichtung: {auto_params.get('exposure', 0.0):+.2f} EV (Kontrast: {auto_params.get('contrast', 1.15):.2f})")
+        self.lbl_telem_wet.configure(text=f"• Nässe / SSR: {auto_params.get('ssr_intensity', 0.5):.2f} (Spiegelung aktiv)")
+        self.lbl_telem_rtgi.configure(text=f"• RTGI Streulicht: {auto_params.get('rtgi_intensity', 0.5):.2f} Bounce")
+        self.lbl_telem_rtao.configure(text=f"• RTAO Kontaktschatten: {auto_params.get('rtao_intensity', 0.6):.2f}")
+
+    def _seek_to_time(self, target_sec):
+        self.current_time_sec = target_sec
+        if not self.is_playing and self.video_path:
+            self._render_single_frame_at(target_sec)
+
+    def _render_single_frame_at(self, sec):
+        def task():
+            cap = cv2.VideoCapture(self.video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            target_frame = int(sec * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            ret, frame_bgr = cap.read()
+            cap.release()
+            if not ret: return
+
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            ph = 540
+            pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
+            small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
+
+            auto_params = self.auto_realism.analyze_and_compute(small_rgb, master_intensity=self.realism_intensity)
+            if self.pipeline is not None:
+                out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
+            else:
+                out_rgb = small_rgb
+
+            if self.split_view_mode == "Original": disp = small_rgb
+            elif self.split_view_mode == "Depth":
+                h, w = depth.shape[:2]
+                comb = np.zeros((h, w * 2, 3), dtype=np.uint8)
+                comb[:, :w] = depth
+                comb[:, w:] = normals
+                disp = comb
+            elif self.split_view_mode == "Split":
+                h, w = out_rgb.shape[:2]
+                mid = w // 2
+                disp = np.copy(out_rgb)
+                disp[:, :mid] = small_rgb[:, :mid]
+                disp[:, mid-2:mid+2] = [255, 255, 255]
+            else:
+                disp = out_rgb
+
+            try:
+                self.after(0, lambda d=disp, t=sec, p=auto_params: self._update_playback_ui(d, t, p))
+            except Exception:
+                pass
+        threading.Thread(target=task, daemon=True).start()
+
+    def _step_time(self, delta_sec):
+        target = max(0.0, min(self.total_duration_sec, self.current_time_sec + delta_sec))
+        self._seek_to_time(target)
+
+    def _rewind_to_start(self):
+        self._seek_to_time(0.0)
+
+    def _seek_to_end(self):
+        self._seek_to_time(self.total_duration_sec)
+
+    def _on_speed_change(self, choice):
+        try:
+            self.playback_speed = float(choice.replace("x", ""))
+        except Exception:
+            self.playback_speed = 1.0
 
     def _on_view_mode_change(self, mode):
         if "Remaster" in mode: self.split_view_mode = "Remaster"
         elif "Split" in mode: self.split_view_mode = "Split"
         elif "Original" in mode: self.split_view_mode = "Original"
         elif "Tiefenkarte" in mode: self.split_view_mode = "Depth"
-
-        if not self.is_playing and self.preview_frames_cache:
-            self._render_current_cached_frame()
-        elif not self.is_playing and self.video_path:
-            self._generate_first_frame_preview()
+        if not self.is_playing:
+            self._render_single_frame_at(self.current_time_sec)
 
     def _on_aspect_change(self, choice):
         self.aspect_ratio_mode = choice
-        if not self.is_playing and self.video_path:
-            self._generate_first_frame_preview()
+        if not self.is_playing:
+            self._render_single_frame_at(self.current_time_sec)
 
-    def _on_menu_click(self):
-        pass
-
-    def _on_split_clip(self):
-        dur = self.video_info.get("duration", 10.0) or 10.0
-        curr_sec = (self.playhead_pos_pct / 100.0) * dur
-        self.trim_end_sec = max(curr_sec, self.trim_start_sec + 0.5)
-        self.lbl_timeline_summary.configure(
-            text=f"Clip geteilt bei {curr_sec:.1f}s | Aktiver Bereich: {self.trim_start_sec:.1f}s – {self.trim_end_sec:.1f}s"
-        )
-        self._draw_timeline()
-
-    def _trim_start_at_playhead(self):
-        dur = self.video_info.get("duration", 10.0) or 10.0
-        curr_sec = (self.playhead_pos_pct / 100.0) * dur
-        if curr_sec < self.trim_end_sec - 0.2:
-            self.trim_start_sec = curr_sec
-            self.lbl_timeline_summary.configure(
-                text=f"Start getrimmt auf {self.trim_start_sec:.1f}s | Länge: {self.trim_end_sec - self.trim_start_sec:.1f}s"
-            )
-            self._draw_timeline()
-
-    def _trim_end_at_playhead(self):
-        dur = self.video_info.get("duration", 10.0) or 10.0
-        curr_sec = (self.playhead_pos_pct / 100.0) * dur
-        if curr_sec > self.trim_start_sec + 0.2:
-            self.trim_end_sec = curr_sec
-            self.lbl_timeline_summary.configure(
-                text=f"Ende getrimmt auf {self.trim_end_sec:.1f}s | Länge: {self.trim_end_sec - self.trim_start_sec:.1f}s"
-            )
-            self._draw_timeline()
-
-    def _reset_trim(self):
-        dur = self.video_info.get("duration", 10.0) or 10.0
-        self.trim_start_sec = 0.0
-        self.trim_end_sec = dur
-        self.lbl_timeline_summary.configure(
-            text=f"Clip-Schnittbereich: 0.0s – {dur:.1f}s (Gesamtlänge)"
-        )
-        self._draw_timeline()
-
-    def _rewind_to_start(self):
-        self.playhead_pos_pct = 0.0
-        self.playback_idx = 0
-        self._sync_playhead_to_player()
-        self._draw_timeline()
-
-    def _seek_to_end(self):
-        self.playhead_pos_pct = 100.0
-        if self.preview_frames_cache:
-            self.playback_idx = len(self.preview_frames_cache) - 1
-        self._sync_playhead_to_player()
-        self._draw_timeline()
-
-    def _step_frame_back(self):
-        if self.preview_frames_cache:
-            self.playback_idx = max(0, self.playback_idx - 1)
-            self.playhead_pos_pct = (self.playback_idx / len(self.preview_frames_cache)) * 100.0
-            self._sync_playhead_to_player()
-            self._draw_timeline()
-
-    def _step_frame_forward(self):
-        if self.preview_frames_cache:
-            self.playback_idx = min(len(self.preview_frames_cache) - 1, self.playback_idx + 1)
-            self.playhead_pos_pct = (self.playback_idx / len(self.preview_frames_cache)) * 100.0
-            self._sync_playhead_to_player()
-            self._draw_timeline()
-
-    def _open_export_modal(self):
-        self.insp_tabview.set("8K Export")
-        self._start_full_render()
-
-    def _collect_params(self):
-        is_auto = bool(self.sw_auto_preset.get())
-        codec_choice = self.combo_codec.get()
-        if "AV1" in codec_choice: enc_codec = "av1_nvenc"
-        elif "HEVC" in codec_choice: enc_codec = "hevc_nvenc"
-        elif "CPU" in codec_choice: enc_codec = "libx264"
-        else: enc_codec = "h264_nvenc"
-
-        profile_key = getattr(self, "current_profile_key", "ultra")
-        profile_settings = get_profile_settings(profile_key)
-
-        return {
-            "auto_preset": is_auto,
-            "enable_trim": (self.trim_start_sec > 0.0 or self.trim_end_sec < (self.video_info.get("duration", 9999.0) - 0.5)),
-            "trim_start": float(self.trim_start_sec),
-            "trim_end": float(self.trim_end_sec),
-            "output_resolution": self.combo_res.get(),
-            "encoder_codec": enc_codec,
-            "bitrate_mbps": int(self.slider_bitrate.get()),
-            "rtgi_intensity": float(self.slider_rtgi.get()),
-            "ssr_intensity": float(self.slider_ssr.get()),
-            "rtao_intensity": float(self.slider_rtao.get()),
-            "clarity": float(self.slider_clarity.get()),
-            "exposure": float(self.slider_exposure.get()),
-            "contrast": float(self.slider_contrast.get()),
-            "bloom_intensity": float(self.slider_bloom.get()),
-            "film_grain": float(self.slider_grain.get()),
-            "denoise": True,
-            "use_aces": True,
-            "rtgi_steps": profile_settings.get("rtgi_steps", 12),
-            "ssr_steps": profile_settings.get("ssr_steps", 16),
-            "rtao_samples": profile_settings.get("rtao_samples", 8),
-            "rtao_radius": profile_settings.get("rtao_radius", 1.4),
-            "max_internal_res": profile_settings.get("max_internal_res", 2160),
-            "dual_nvenc": profile_settings.get("dual_nvenc", False),
-            "nvenc_preset": profile_settings.get("nvenc_preset", "p7"),
-            "empty_cache_freq": profile_settings.get("empty_cache_freq", 60),
-        }
-
-    def _generate_first_frame_preview(self):
-        if not self.video_path or not os.path.exists(self.video_path):
-            return
-
-        params = self._collect_params()
-        view_mode = self.split_view_mode
-        curr_pct = self.playhead_pos_pct
-
-        def task():
-            cap = cv2.VideoCapture(self.video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            dur = self.video_info.get("duration", 10.0) or 10.0
-            curr_sec = (curr_pct / 100.0) * dur
-            target_frame = int(curr_sec * fps)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-
-            ret, frame_bgr = cap.read()
-            cap.release()
-            if not ret:
-                return
-
-            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-
-            if self.pipeline is None:
-                self.pipeline = VideoPipeline()
-
-            out_rgb, depth, normals = self.pipeline.process_single_frame(frame_rgb, params)
-
-            if view_mode == "Original":
-                display = frame_rgb
-            elif view_mode == "Depth":
-                h, w = depth.shape[:2]
-                combined = np.zeros((h, w * 2, 3), dtype=np.uint8)
-                combined[:, :w] = depth
-                combined[:, w:] = normals
-                display = combined
-            elif view_mode == "Split":
-                h, w = out_rgb.shape[:2]
-                mid = w // 2
-                display = np.copy(out_rgb)
-                display[:, :mid] = frame_rgb[:, :mid]
-                display[:, mid-2:mid+2] = [255, 255, 255]
-            else:
-                display = out_rgb
-
-            self.after(0, lambda d=display: self._display_image_on_screen(d))
-
-        threading.Thread(target=task, daemon=True).start()
-
-    def _generate_video_preview(self):
-        if not self.video_path or not os.path.exists(self.video_path):
-            messagebox.showwarning("Kein Video", "Bitte wähle zuerst eine Videodatei aus!")
-            return
-
-        if self.is_rendering:
-            return
-
-        self.btn_gen_preview.configure(text="⏳ Rendere Vorschau...", state="disabled")
-        self.lbl_status.configure(text="⚡ Rendere interaktive Vorschau auf NVIDIA RTX Tensor Cores...")
-        self.progress_bar.set(0)
-
-        def task():
-            try:
-                cap = cv2.VideoCapture(self.video_path)
-                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-                preview_duration = 3.5
-                max_frames = int(preview_duration * min(fps, 30.0))
-
-                start_frame = int(self.trim_start_sec * fps)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
-                params = self._collect_params()
-                if self.pipeline is None:
-                    self.pipeline = VideoPipeline()
-
-                self.auto_optimizer.reset()
-                frames_cache = []
-
-                for i in range(max_frames):
-                    ret, frame_bgr = cap.read()
-                    if not ret:
-                        break
-
-                    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                    ph = 540
-                    pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
-                    frame_small = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
-
-                    out_rgb, depth, normals = self.pipeline.process_single_frame(frame_small, params)
-                    frames_cache.append((frame_small, out_rgb, depth, normals))
-
-                    prog = (i + 1) / max_frames
-                    self.after(0, lambda p=prog, idx=i+1: self._update_preview_progress(p, idx, max_frames))
-
-                cap.release()
-                self.preview_frames_cache = frames_cache
-                self.playback_idx = 0
-
-                self.after(0, self._on_preview_ready)
-            except Exception as e:
-                self.after(0, lambda err=str(e): self.lbl_status.configure(text=f"Fehler bei Vorschau: {err}"))
-            finally:
-                self.after(0, lambda: self.btn_gen_preview.configure(text="⚡ Vorschau rendern", state="normal"))
-
-        threading.Thread(target=task, daemon=True).start()
-
-    def _update_preview_progress(self, prog, curr, total):
-        self.progress_bar.set(prog)
-        self.lbl_status.configure(text=f"Rendere Video-Vorschau: Frame {curr}/{total}...")
-
-    def _on_preview_ready(self):
-        self.lbl_status.configure(text="✅ Video-Vorschau fertig! Spielt in Schleife ab.")
-        self.progress_bar.set(1.0)
-        self.is_playing = True
-        self.btn_play_pause.configure(text="⏸")
-        self._run_playback_loop()
-
-    def _toggle_playback(self):
-        if not self.preview_frames_cache:
-            self._generate_video_preview()
-            return
-        self.is_playing = not self.is_playing
-        self.btn_play_pause.configure(text="⏸" if self.is_playing else "▶")
-        if self.is_playing:
-            self._run_playback_loop()
-
-    def _run_playback_loop(self):
-        if not self.is_playing or not self.preview_frames_cache:
-            return
-
-        self._render_current_cached_frame()
-
-        n = len(self.preview_frames_cache)
-        self.playhead_pos_pct = (self.playback_idx / n) * 100.0 if n > 0 else 0
-        self._draw_timeline()
-
-        dur = self.video_info.get("duration", 10.0) or 10.0
-        curr_sec = (self.playhead_pos_pct / 100.0) * dur
-        m = int(curr_sec // 60)
-        s = int(curr_sec % 60)
-        f = int((curr_sec - int(curr_sec)) * 30)
-        dur_m = int(dur // 60)
-        dur_s = int(dur % 60)
-        dur_f = int((dur - int(dur)) * 30)
-        self.lbl_timecode.configure(text=f"{m:02d}:{s:02d}:{f:02d} / {dur_m:02d}:{dur_s:02d}:{dur_f:02d}")
-
-        self.playback_idx = (self.playback_idx + 1) % n
-        self.after(33, self._run_playback_loop)
-
-    def _render_current_cached_frame(self):
-        if not self.preview_frames_cache or self.playback_idx >= len(self.preview_frames_cache):
-            return
-
-        item = self.preview_frames_cache[self.playback_idx]
-        orig_frame = item[0]
-        remaster_frame = item[1]
-        depth = item[2] if len(item) > 2 else None
-        normals = item[3] if len(item) > 3 else None
-
-        if self.split_view_mode == "Remaster":
-            display_img = remaster_frame
-        elif self.split_view_mode == "Original":
-            display_img = orig_frame
-        elif self.split_view_mode == "Depth" and depth is not None:
-            h, w = depth.shape[:2]
-            combined = np.zeros((h, w * 2, 3), dtype=np.uint8)
-            combined[:, :w] = depth
-            combined[:, w:] = normals
-            display_img = combined
-        else:
-            h, w = remaster_frame.shape[:2]
-            mid = w // 2
-            display_img = np.copy(remaster_frame)
-            display_img[:, :mid] = orig_frame[:, :mid]
-            display_img[:, mid-2:mid+2] = [255, 255, 255]
-
-        self._display_image_on_screen(display_img)
+    def _on_intensity_change(self, val):
+        self.realism_intensity = float(val)
+        if not self.is_playing:
+            self._render_single_frame_at(self.current_time_sec)
 
     def _display_image_on_screen(self, img_rgb):
         cw = self.canvas_container.winfo_width() or 800
@@ -1382,6 +1065,47 @@ class LuxanixDesktopApp(ctk.CTk):
         self.lbl_screen.configure(image=ctk_img, text="")
         self.lbl_screen.image = ctk_img
 
+    def load_video(self, file_path):
+        if not file_path or not os.path.exists(file_path):
+            return
+
+        self.video_path = file_path
+        self.video_info = get_video_info(file_path)
+
+        w = self.video_info.get("width", 1920)
+        h = self.video_info.get("height", 1080)
+        self.fps = self.video_info.get("fps", 60.0)
+        self.total_duration_sec = self.video_info.get("duration_sec", 10.0)
+        self.total_frames = self.video_info.get("total_frames", 300)
+        aspect = self.video_info.get("aspect_ratio", "16:9")
+
+        self.lbl_clip_title.configure(text=f"📄 {os.path.basename(file_path)}")
+        self.lbl_clip_details.configure(
+            text=f"Auflösung: {w}x{h} ({aspect}) | {self.fps:.1f} FPS\nDauer: {self.total_duration_sec:.1f}s ({self.total_frames} Frames)"
+        )
+        self.lbl_media_status.configure(text=f"✅ Geladen: {os.path.basename(file_path)}")
+
+        # Initialize timeline segments
+        self.timeline_segments = [{"start": 0.0, "end": self.total_duration_sec, "title": os.path.splitext(os.path.basename(file_path))[0]}]
+        self.selected_segment_idx = 0
+        self.current_time_sec = 0.0
+
+        self._update_timeline_stats()
+        self._draw_timeline()
+        self._render_single_frame_at(0.0)
+
+    def _choose_video(self):
+        file_path = filedialog.askopenfilename(
+            title="Wähle ein Gameplay- oder Simracing-Video",
+            filetypes=[("Video-Dateien", "*.mp4 *.mkv *.avi *.mov *.webm"), ("Alle Dateien", "*.*")]
+        )
+        if not file_path:
+            return
+        self.load_video(file_path)
+
+    # =========================================================================
+    # EXPORT PIPELINE (FULL TIMELINE WITH REAL AI-UPSCALING & AV1 NVENC)
+    # =========================================================================
     def _start_full_render(self):
         if not self.video_path or not os.path.exists(self.video_path):
             messagebox.showwarning("Kein Video", "Bitte wähle zuerst ein Video aus!")
@@ -1392,22 +1116,57 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.is_rendering = True
         self.is_playing = False
-        self.btn_header_export.configure(state="disabled", text="⏳ Rendert...")
+        self.btn_export.configure(state="disabled", text="⏳ Rendert...")
 
         output_dir = os.path.join(os.path.expanduser("~"), "Videos", "Luxanix_Renders")
         os.makedirs(output_dir, exist_ok=True)
 
         base_name = os.path.splitext(os.path.basename(self.video_path))[0]
-        out_file = os.path.join(output_dir, f"{base_name}_Luxanix_RTX.mp4")
+        out_file = os.path.join(output_dir, f"{base_name}_Luxanix_RTX_Remaster.mp4")
 
-        params = self._collect_params()
+        # Check target resolution from Upscaler combo
+        choice = self.combo_upscale.get()
+        if "8K" in choice:
+            out_res = "8K Ultra HD (4320p)"
+            codec = "av1_nvenc"
+            bitrate = 80
+        elif "4K" in choice:
+            out_res = "4K Ultra HD (2160p)"
+            codec = "hevc_nvenc"
+            bitrate = 50
+        elif "2K" in choice:
+            out_res = "1440p 2K QHD"
+            codec = "hevc_nvenc"
+            bitrate = 35
+        else:
+            out_res = "Original"
+            codec = "hevc_nvenc"
+            bitrate = 25
+
+        # Render parameters
+        params = {
+            "auto_realism": True,
+            "realism_intensity": self.realism_intensity,
+            "neural_upscale": bool(self.sw_neural.get()),
+            "output_resolution": out_res,
+            "encoder_codec": codec,
+            "bitrate_mbps": bitrate,
+            "enable_trim": True,
+            "trim_start": self.timeline_segments[0]["start"] if self.timeline_segments else 0.0,
+            "trim_end": self.timeline_segments[-1]["end"] if self.timeline_segments else self.total_duration_sec,
+            "nvenc_preset": "p7",
+            "denoise": True
+        }
 
         def progress_cb(curr, total, fps, eta, elapsed):
             prog = curr / total if total > 0 else 0.0
             pct = prog * 100.0
             m_eta, s_eta = int(eta // 60), int(eta % 60)
             m_el, s_el = int(elapsed // 60), int(elapsed % 60)
-            self.after(0, lambda: self._update_render_ui(prog, pct, curr, total, fps, m_eta, s_eta, m_el, s_el))
+            try:
+                self.after(0, lambda: self._update_render_ui(prog, pct, curr, total, fps, m_eta, s_eta, m_el, s_el))
+            except Exception:
+                pass
 
         def render_thread():
             try:
@@ -1420,36 +1179,42 @@ class LuxanixDesktopApp(ctk.CTk):
                     params=params,
                     progress_callback=progress_cb
                 )
-                self.after(0, lambda: self._on_render_complete(rendered_path))
+                try:
+                    self.after(0, lambda: self._on_render_complete(rendered_path))
+                except Exception:
+                    pass
             except Exception as e:
-                self.after(0, lambda err=str(e): self._on_render_error(err))
+                try:
+                    self.after(0, lambda err=str(e): self._on_render_error(err))
+                except Exception:
+                    pass
 
         threading.Thread(target=render_thread, daemon=True).start()
 
     def _update_render_ui(self, prog, pct, curr, total, fps, m_eta, s_eta, m_el, s_el):
         self.progress_bar.set(prog)
         self.lbl_status.configure(
-            text=f"Rendere: Frame {curr}/{total} ({pct:.1f}%) | {fps:.1f} FPS | Verstrichen: {m_el:02d}:{s_el:02d}"
+            text=f"Rendere Video: Frame {curr}/{total} ({pct:.1f}%) | {fps:.1f} FPS | Verstrichen: {m_el:02d}:{s_el:02d}"
         )
         self.lbl_eta.configure(text=f"Restzeit: {m_eta:02d}:{s_eta:02d} Min")
 
     def _on_render_complete(self, output_path):
         self.is_rendering = False
         self.progress_bar.set(1.0)
-        self.btn_header_export.configure(state="normal", text="🚀 Exportieren")
+        self.btn_export.configure(state="normal", text="🚀 Exportieren")
         self.lbl_status.configure(text=f"✅ Fertig! Gespeichert in: {output_path}")
         self.lbl_eta.configure(text="FERTIG")
 
         resp = messagebox.askyesno(
             "Render Erfolgreich!",
-            f"Das Video wurde erfolgreich in 8K/RTX gerendert:\n\n{output_path}\n\nMöchtest du den Ordner im Explorer öffnen?"
+            f"Das Video wurde erfolgreich mit RTX & Neural AI-Upscaling gerendert:\n\n{output_path}\n\nMöchtest du den Ordner im Explorer öffnen?"
         )
         if resp:
             os.system(f'explorer /select,"{output_path}"')
 
     def _on_render_error(self, err_msg):
         self.is_rendering = False
-        self.btn_header_export.configure(state="normal", text="🚀 Exportieren")
+        self.btn_export.configure(state="normal", text="🚀 Exportieren")
         self.lbl_status.configure(text=f"Fehler: {err_msg}")
         messagebox.showerror("Fehler beim Rendern", f"Ein Fehler ist aufgetreten:\n{err_msg}")
 

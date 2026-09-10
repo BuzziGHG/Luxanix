@@ -72,31 +72,44 @@ Luxanix Studio erkennt deine Grafikkarte automatisch und wählt das passende Spe
 
 ---
 
-## 🎮 Enthaltene Presets für Simracing & Gaming
+---
 
-Preset | Beschreibung
-:--- | :---
-🔥 **RTX 50 Blackwell: Hyper-Path Tracing (8K Ultra)** | 18 RTGI Bounces, 24 SSR Steps, 12 RTAO Samples, AV1 Dual-NVENC Export.
-⚡ **RTX 50 Blackwell: Nürburgring 24h Photorealism** | Diffuses Nordschleifen-Licht, nasse Eifel-Kurven, mikrofeine Asphaltschärfe.
-🌧️ **Simracing: Wet Track & Reflections** | Extreme Screen-Space-Reflexionen auf der Fahrbahn, kühler Ton, verstärkte Kontaktschatten für Regenschlachten.
-🌅 **Simracing: Golden Hour Sunset** | Warme Farbtemperatur, weiches RTGI-Bounce-Licht, Sonnenuntergangs-Glow und cinematische Kontraste.
-☁️ **Simracing: Nürburgring Overcast** | Realistische, neutrale Farbwiedergabe, diffuse Schatten und natürliche Strecken-Details.
-🌃 **Simracing: Night Race & Headlights** | Knackige Tiefschwarzwerte, starker Bloom auf Scheinwerfern und Rückleuchten, Reflexionen auf Asphalt.
-🏆 **Assetto Corsa / ACC Hyper-Realism** | Balanciertes RTGI + SSR, subtile Texturschärfung für Cockpit- und Verfolger-Perspektiven.
+## 🤖 100% Autonome KI-Physik-Engine (Keine manuellen Presets nötig!)
+
+Kein Auswählen von Presets mehr nötig! Luxanix Studio analysiert jeden Videoframe kontinuierlich in Echtzeit und berechnet die physikalischen Licht- und Geometriewerte vollkommen autonom:
+- **Log-Luminanz Auto-Belichtung (EV):** Passt Nachtfahrten, sonnige Mittagsrennen und Tunnelausfahrten dynamisch an, ohne Highlights auszubrennen.
+- **Adaptive S-Kurven Kontrastkurve:** Verleiht flachen Gameplay-Szenen sofort cinematische Tiefe.
+- **Autonome Asphaltschärfe & Nässe-Reflexionen (SSR):** Erkennt feuchte Streckenabschnitte und projiziert physikalisch akkurate Screen-Space-Reflexionen.
+- **Ray Traced Global Illumination (RTGI) & Kontaktschatten (RTAO):** Rechnet diffuses Streulicht von Curbs und Streckenbegrenzungen sowie präzise Kontaktschatten unter Fahrzeugen.
+- **Temporale Glättung (EMA):** Verhindert störendes Flackern zwischen benachbarten Frames.
 
 ---
 
-## 📺 8K Ultra-Upscaling & AI Super-Resolution
+## 🔬 Echter Neural AI Super-Resolution Upscaler (NVIDIA Tensor Cores)
 
-Luxanix Studio bietet integriertes High-End Upscaling bis zu **8K Ultra HD (7680x4320 / 4320p)**:
-- **Lanczos4 & Detail-Clarity Super-Resolution:** Schärft feine Streckentexturen, Curbs, Sponsoren-Aufkleber und Cockpit-Displays kristallklar nach.
-- **Hardware-beschleunigter AV1 & HEVC NVENC Export:** Volle Ausnutzung der NVIDIA-Hardware-Encoder bis zu 8192x8192 bei variabler Bitrate bis 160 Mbps.
-- **Volle Ultrawide- & Triple-Screen Unterstützung:**
-  - Standard 16:9: Bis zu 7680 x 4320 (8K UHD)
-  - Ultrawide 21:9: Bis zu 8192 x 3480
-  - Super-Ultrawide 32:9: Bis zu 8192 x 2304
+Ein echtes tiefes neuronales Netzwerk (**Residual Dense Blocks + Sub-Pixel PixelShuffle**) rekonstruiert verloren gegangene Mikro-Texturen:
+- **1080p ➔ 4K (2160p) & 8K Ultra HD (4320p):** Echte Hochskalierung über CUDA FP16 Tensor Cores, nicht nur einfacher Filter-Resize.
+- **Artefakt-Entfernung:** Glättet Kompressions-Makroblöcke von YouTube/OBS-Aufnahmen.
+- **Kristallklare Kanten:** Curbs, Fahrzeugdetails, Sponsorenlogos und Streckenschilder bleiben gestochen scharf.
 
 ---
+
+## 🎬 Durchgängiger Vollvideo-Player & Timeline-Schnitt (CapCut Pro NLE)
+
+- **Komplettes Video vor dem Export ansehen:** Spiele dein Video von Minute 00:00 bis zum Ende mit Live-RTX-Remastering und A/B Split-Screen ab.
+- **Timeline-Schnittwerkzeuge:**
+  - `Strg + B`: Teilt den Clip an der aktuellen Playhead-Position.
+  - `Entf`: Löscht das ausgewählte Segment.
+  - `I / O`: Trimmt In- und Out-Punkte.
+  - Interaktive Zeitleiste mit Audiowellenform und Playhead-Scrubbing.
+
+---
+
+## 🚀 1-Klick GitHub Upload
+
+Um den lokalen Code und Updates direkt auf dein GitHub-Repository hochzuladen:
+1. Doppelklicke auf `upload_to_github.bat`.
+2. Wähle Option 1 (Browser-Login) oder Option 2 (Token). Das Skript synchronisiert den gesamten Code automatisch mit `https://github.com/BuzziGHG/Luxanix.git`.
 
 ## 📜 Lizenz
 
