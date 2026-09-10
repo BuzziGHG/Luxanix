@@ -210,6 +210,8 @@ class VideoPipeline:
         """
         Processes a single RGB frame for live UI preview.
         Supports adaptive internal resolution scaling for low VRAM cards (e.g. RTX 2060/2070).
+        When params['fast_preview'] is True (live playback), skips depth estimation and
+        raytracing to achieve near real-time 25-30 fps preview — only applies color grading.
         """
         orig_h, orig_w = frame_rgb.shape[:2]
         max_internal_res = params.get("max_internal_res", None)
@@ -230,6 +232,34 @@ class VideoPipeline:
             for k, v in auto_vals.items():
                 params[k] = v
 
+        # ---------------------------------------------------------------
+        # FAST PREVIEW PATH — skips depth + raytracing for real-time playback
+        # This delivers ~30fps live preview vs. ~1-3fps with full pipeline.
+        # Only applies when params['fast_preview'] is True (set by playback thread).
+        # ---------------------------------------------------------------
+        if params.get("fast_preview", False):
+            color_np = frame_proc.astype(np.float32) / 255.0
+            color_tensor = torch.from_numpy(color_np).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.dtype)
+
+            # Minimal RT buffers — skip raytracing, pass neutral buffers
+            h_fp, w_fp = frame_proc.shape[:2]
+            empty_rt = {
+                "rtao": torch.ones(1, 1, h_fp, w_fp, device=self.device, dtype=self.dtype),
+                "rtgi": torch.zeros(1, 3, h_fp, w_fp, device=self.device, dtype=self.dtype),
+                "ssr":  torch.zeros(1, 3, h_fp, w_fp, device=self.device, dtype=self.dtype),
+                "normals": torch.zeros(1, 3, h_fp, w_fp, device=self.device, dtype=self.dtype),
+            }
+            output_tensor = self.grader.grade(color_tensor, empty_rt, params)
+            out_np = (output_tensor.squeeze(0).permute(1, 2, 0).cpu().float().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+            if needs_resize:
+                out_np = cv2.resize(out_np, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+            blank = np.zeros((orig_h, orig_w, 3), dtype=np.uint8)
+            return out_np, blank, blank
+
+        # ---------------------------------------------------------------
+        # FULL QUALITY PATH — used for export and single-frame scrub preview
+        # ---------------------------------------------------------------
+
         # 1. Depth Estimation
         depth = self.depth_estimator.estimate_depth(frame_proc).to(device=self.device, dtype=self.dtype)
 
@@ -242,11 +272,11 @@ class VideoPipeline:
 
         # 4. Denoise RTGI & SSR
         if params.get("denoise", True):
-            if params.get("rtgi_intensity", 0.65) > 0:
+            if params.get("rtgi_intensity", 0.25) > 0:
                 rt_results["rtgi"] = self.denoiser.denoise(
                     rt_results["rtgi"], depth, rt_results["normals"]
                 )
-            if params.get("ssr_intensity", 0.5) > 0:
+            if params.get("ssr_intensity", 0.15) > 0:
                 rt_results["ssr"] = self.denoiser.denoise(
                     rt_results["ssr"], depth, rt_results["normals"]
                 )
@@ -275,6 +305,7 @@ class VideoPipeline:
             normals_viz = cv2.resize(normals_viz, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
         return out_np, depth_viz, normals_viz
+
 
     @torch.inference_mode()
     def process_image(

@@ -40,11 +40,21 @@ class ColorGrader:
         rtgi = rt_buffers.get("rtgi", torch.zeros_like(base_color))
         ssr = rt_buffers.get("ssr", torch.zeros_like(base_color))
 
-        # 1. Physically-Based Composite
-        # Base color multiplied by ambient occlusion, plus indirect bounce light and reflections
-        composited = base_color * ao + rtgi + ssr
+        # 1. Physically-Based Composite (atmosphere-preserving)
+        # AO is kept very close to 1.0 so it doesn't darken the whole scene.
+        # RTGI and SSR are blended in as additive highlights only on bright areas
+        # (wet reflections, indirect bounces) — not affecting overall luminance.
+        # Clamp AO to [0.85, 1.0] so it only adds subtle contact shadow, not full darkness.
+        ao_clamped = torch.clamp(ao, min=0.85, max=1.0)
+        composited = base_color * ao_clamped
 
-        # 2. Exposure adjustment (in EV stops: 2^ev)
+        # RTX effects: additive, but scaled down to stay subtle
+        # Only blend into areas that have existing luminance (avoids brightening flat darks)
+        rtgi_weight = params.get("rtgi_intensity", 0.25)
+        ssr_weight  = params.get("ssr_intensity",  0.15)
+        composited = composited + rtgi * rtgi_weight * 0.4 + ssr * ssr_weight * 0.4
+
+        # 2. Exposure adjustment (in EV stops: 2^ev) — now very small range from auto_realism
         exposure = params.get("exposure", 0.0)
         if exposure != 0.0:
             composited = composited * (2.0 ** exposure)
@@ -69,17 +79,20 @@ class ColorGrader:
             composited = self._apply_saturation_vibrance(composited, saturation, vibrance)
 
         # 6. Multi-scale Bloom (RTX Glow on headlights & reflections)
-        bloom_intensity = params.get("bloom_intensity", 0.15)
-        bloom_threshold = params.get("bloom_threshold", 0.8)
+        bloom_intensity = params.get("bloom_intensity", 0.10)
+        bloom_threshold = params.get("bloom_threshold", 0.85)
         if bloom_intensity > 0.0:
             composited = self._apply_bloom(composited, bloom_intensity, bloom_threshold)
 
-        # 7. ACES Filmic Tone Mapping
-        use_aces = params.get("use_aces", True)
+        # 7. Tone Mapping: use a gentler Reinhard-style for cinematic dark scenes,
+        # ACES only when explicitly requested (it compresses midtones heavily).
+        use_aces = params.get("use_aces", False)   # Default OFF — preserves mood
         if use_aces:
             composited = self._aces_tonemap(composited)
         else:
-            composited = torch.clamp(composited, 0.0, 1.0)
+            # Soft Reinhard: only compresses near-white highlights, leaves darks intact
+            composited = composited / (composited + 0.5)   # very gentle shoulder
+            composited = torch.clamp(composited * 1.04, 0.0, 1.0)  # slight exposure compensation for the division
 
         # 8. Subtle Lens Vignette
         vignette_amount = params.get("vignette", 0.0)

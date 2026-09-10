@@ -69,62 +69,65 @@ class AutonomousRealismEngine:
 
         # -------------------------------------------------------------
         # AUTONOMOUS PHYSICAL CALCULATIONS
+        # Principle: PRESERVE the original cinematic mood.
+        # Effects should be ADDITIVE and SUBTLE — enhance realism
+        # without altering the fundamental exposure or atmosphere.
         # -------------------------------------------------------------
 
-        # A. Auto-Exposure EV:
-        # Target middle gray ~ 0.18
-        # If dark night: brighten moderately without overblowing
-        # If bright noon: tone down slightly to prevent blown-out tarmac
-        if log_mean_lum < 0.15:
-            # Night or tunnel
-            auto_exposure = float(np.clip(0.18 - log_mean_lum * 0.8, -0.2, 0.45))
-        elif log_mean_lum > 0.35:
-            # Harsh sunlight
-            auto_exposure = float(np.clip(-0.15 - (log_mean_lum - 0.35) * 0.5, -0.4, 0.0))
+        # A. Auto-Exposure EV (VERY conservative — preserve original mood):
+        # Maximum adjustment is ±0.25 EV — never aggressively brighten dark cinematic scenes.
+        # Dark scenes (motorsport, night, moody): intentionally dark — do NOT push to 0.18.
+        # Only correct extreme clipping or near-black sensor noise.
+        if log_mean_lum < 0.04:
+            # Extremely dark / sensor noise territory — very slight lift only
+            auto_exposure = float(np.clip(0.08 - log_mean_lum * 0.6, 0.0, 0.20))
+        elif log_mean_lum > 0.55:
+            # Genuinely over-exposed — gentle pull-down
+            auto_exposure = float(np.clip(-(log_mean_lum - 0.55) * 0.35, -0.20, 0.0))
         else:
-            auto_exposure = float(0.04 * (0.22 - log_mean_lum))
+            # Normal range: barely touch exposure — let the original speak
+            auto_exposure = float(np.clip(0.015 * (0.25 - log_mean_lum), -0.08, 0.08))
 
-        # B. Contrast S-Curve:
-        # Low contrast scenes (foggy/flat) get natural expansion (1.18 - 1.25)
-        # High contrast scenes get gentler rolloff (1.06 - 1.12)
-        if std_lum < 0.14:
-            auto_contrast = 1.22
-        elif std_lum > 0.26:
+        # B. Contrast S-Curve (subtle — don't crush the cinematic blacks):
+        # Low contrast foggy shots: slight lift (1.05-1.10 max)
+        # High contrast dynamic shots: no extra contrast added (leave it)
+        if std_lum < 0.12:
             auto_contrast = 1.08
+        elif std_lum > 0.28:
+            auto_contrast = 1.02
         else:
-            auto_contrast = float(1.22 - (std_lum - 0.14) * (0.14 / 0.12))
+            auto_contrast = float(1.08 - (std_lum - 0.12) * (0.06 / 0.16))
 
         # C. Screen-Space Reflections (SSR) & Surface Wetness:
-        # Puddles / wet tarmac reflect headlights and curbs strongly
-        wetness_score = float(np.clip(road_highlights * 6.0 + (road_std * 1.8), 0.15, 0.95))
-        auto_ssr = float(np.clip(0.35 + wetness_score * 0.65, 0.30, 0.95))
+        # SSR only appears visibly on wet roads, puddles, or reflective surfaces.
+        # Keep base SSR low — let physics drive it, not scene brightness.
+        wetness_score = float(np.clip(road_highlights * 4.0 + (road_std * 1.2), 0.05, 0.80))
+        auto_ssr = float(np.clip(0.15 + wetness_score * 0.40, 0.10, 0.55)) * master_intensity
 
-        # D. Ray Traced Global Illumination (RTGI Streulicht):
-        # Kerbs and sky reflect light onto the car and asphalt
-        auto_rtgi = float(np.clip(0.40 + mean_sat * 0.70 + (0.10 if sky_blue_bias > 0.05 else 0.0), 0.35, 0.85))
+        # D. Ray Traced Global Illumination (RTGI — subtle indirect bounce):
+        # Bounced light from kerbs/sky onto asphalt — additive, not scene-replacing.
+        auto_rtgi = float(np.clip(0.20 + mean_sat * 0.35 + (0.05 if sky_blue_bias > 0.05 else 0.0), 0.15, 0.45)) * master_intensity
 
-        # E. Ray Traced Ambient Occlusion (RTAO Kontaktschatten):
-        # Dark shadows under chassis and wheels
-        auto_rtao = float(np.clip(0.50 + (0.25 if mean_lum > 0.20 else 0.10), 0.45, 0.80))
+        # E. Ray Traced Ambient Occlusion (RTAO — subtle contact shadows):
+        # Contact shadows under chassis, wheels, body kit. Subtle, localized only.
+        auto_rtao = float(np.clip(0.55 + (0.10 if mean_lum > 0.25 else 0.05), 0.50, 0.70))
 
-        # F. Headlight & Sun Bloom:
-        # Proportional to specular highlight density
-        auto_bloom = float(np.clip(0.15 + highlights * 3.5, 0.15, 0.60))
+        # F. Headlight & Sun Bloom (cinematic glow — tight, not hazy):
+        auto_bloom = float(np.clip(0.08 + highlights * 1.8, 0.08, 0.35))
 
-        # G. Detail-Clarity (Anti-TAA Sharpening):
-        # Compensates for temporal anti-aliasing blur
-        auto_clarity = float(np.clip(0.32 + (0.15 if std_lum < 0.20 else 0.05), 0.25, 0.48))
+        # G. Detail-Clarity (subtle sharpening — removes TAA blur without over-sharpening):
+        auto_clarity = float(np.clip(0.18 + (0.08 if std_lum < 0.18 else 0.02), 0.15, 0.28))
 
         # Raw computed dictionary
         raw_computed = {
             "exposure": auto_exposure,
             "contrast": auto_contrast,
-            "ssr_intensity": auto_ssr * master_intensity,
-            "rtgi_intensity": auto_rtgi * master_intensity,
+            "ssr_intensity": auto_ssr,      # already multiplied by master_intensity above
+            "rtgi_intensity": auto_rtgi,     # already multiplied by master_intensity above
             "rtao_intensity": auto_rtao * master_intensity,
             "bloom_intensity": auto_bloom,
             "clarity": auto_clarity,
-            "film_grain": 0.06,
+            "film_grain": 0.04,
             "wetness_score": wetness_score,
             "mean_luminance": mean_lum,
         }

@@ -1364,15 +1364,17 @@ class LuxanixDesktopApp(ctk.CTk):
 
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-            # Fast preview resolution for smooth 30/60fps playback
-            ph = 540
+            # Fast preview resolution — 720p gives excellent quality with fast color-grading path
+            ph = 720
             pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
             small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
 
             # 1. Autonomous Realism Computation (No Presets!)
             auto_params = self.auto_realism.analyze_and_compute(small_rgb, master_intensity=self.realism_intensity)
+            # Fast preview mode: skip depth estimation + raytracing for real-time playback
+            auto_params["fast_preview"] = True
 
-            # 2. Render enhanced frame
+            # 2. Render enhanced frame (fast color-grading path during live playback)
             if self.pipeline is not None:
                 out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
             else:
@@ -1381,12 +1383,13 @@ class LuxanixDesktopApp(ctk.CTk):
             # 3. Apply Split Mode
             if self.split_view_mode == "Original":
                 disp = small_rgb
-            elif self.split_view_mode == "Depth" and 'depth' in locals():
-                h, w = depth.shape[:2]
-                comb = np.zeros((h, w * 2, 3), dtype=np.uint8)
-                comb[:, :w] = depth
-                comb[:, w:] = normals
-                disp = comb
+            elif self.split_view_mode == "Depth":
+                # In fast preview mode no depth map — show Original vs Enhanced A/B split instead
+                h, w = out_rgb.shape[:2]
+                mid = w // 2
+                disp = np.copy(out_rgb)
+                disp[:, :mid] = small_rgb[:, :mid]
+                disp[:, mid-2:mid+2] = [255, 255, 0]  # Yellow divider = fast preview A/B
             elif self.split_view_mode == "Split":
                 h, w = out_rgb.shape[:2]
                 mid = w // 2
@@ -1395,6 +1398,7 @@ class LuxanixDesktopApp(ctk.CTk):
                 disp[:, mid-2:mid+2] = [255, 255, 255]
             else:
                 disp = out_rgb
+
 
             # Advance playhead
             self.current_time_sec += (1.0 / fps) * self.playback_speed
