@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -250,9 +250,12 @@ namespace LuxanixLauncher
                         return;
                     }
 
-                    UpdateStatus("⚡ Starte Luxanix Studio (NVIDIA CUDA Pipeline)...");
+                    UpdateStatus("⚡ Starte Luxanix Studio Desktop-App (NVIDIA CUDA Pipeline)...");
 
-                    ProcessStartInfo psi = new ProcessStartInfo(venvPython, "ui\\app.py")
+                    string desktopAppPy = Path.Combine(targetDir, "ui", "desktop_app.py");
+                    string launchScript = File.Exists(desktopAppPy) ? "ui\\desktop_app.py" : "ui\\app.py";
+
+                    ProcessStartInfo psi = new ProcessStartInfo(venvPython, launchScript)
                     {
                         WorkingDirectory = targetDir,
                         CreateNoWindow = true,
@@ -260,33 +263,21 @@ namespace LuxanixLauncher
                     };
                     serverProcess = Process.Start(psi);
 
-                    // Wait for server port 7860 to become available
-                    bool ready = false;
-                    for (int i = 0; i < 50; i++)
-                    {
-                        if (serverProcess.HasExited) break;
-                        if (IsPortOpen("127.0.0.1", 7860, 500))
-                        {
-                            ready = true;
-                            break;
-                        }
-                        Thread.Sleep(500);
-                    }
+                    // Wait for native desktop window to display, then hide splash
+                    Thread.Sleep(2500);
 
-                    if (ready)
+                    if (serverProcess != null && !serverProcess.HasExited)
                     {
-                        UpdateStatus("✅ Luxanix Studio läuft auf http://127.0.0.1:7860");
                         this.Invoke((MethodInvoker)delegate
                         {
-                            progressBar.Visible = false;
-                            btnOpenBrowser.Visible = true;
+                            this.Hide();
                         });
-                        OpenBrowser();
+                        serverProcess.WaitForExit();
+                        Application.Exit();
                     }
                     else
                     {
-                        UpdateStatus("Server gestartet. Öffne Browser...");
-                        OpenBrowser();
+                        UpdateStatus("Anwendung beendet.");
                     }
                 }
                 catch (Exception ex)

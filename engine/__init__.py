@@ -10,6 +10,7 @@ from .denoiser import BilateralDenoiser
 from .postprocess import ColorGrader
 from .video_pipeline import VideoPipeline, get_video_info
 from .hardware import detect_gpu_hardware, get_profile_settings, GPUHardwareProfile
+from .auto_preset import AutoSceneOptimizer
 
 __all__ = [
     "DepthEstimator",
@@ -23,4 +24,5 @@ __all__ = [
     "detect_gpu_hardware",
     "get_profile_settings",
     "GPUHardwareProfile",
+    "AutoSceneOptimizer",
 ]

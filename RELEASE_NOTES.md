@@ -15,26 +15,17 @@ Verwandle normale Gameplay- und Simracing-Videoaufnahmen in photorealistische Me
 
 ### 🏎️ Highlights & Features
 
-- **🚀 Native GPU-Beschleunigung:**
-  - Optimiert für **NVIDIA GeForce RTX 3080 Ti** (12 GB VRAM) und alle Ampere-GPUs.
-  - **Low-VRAM Profil:** Schützt ältere Karten wie **RTX 2060/2070** vor Speichermangel durch adaptive interne Skalierung.
-  - Volle Unterstützung für **RTX 40-Serie** und vorbereitet für **RTX 50-Serie**.
-- **📐 Video-Maße & Metadaten:**
-  - Automatische Erkennung und Anzeige von Auflösung (1080p, 1440p, 4K), Bildseitenverhältnis (16:9, 21:9 Ultrawide, 32:9 Triple-Screen), Bildrate (FPS) und Gesamtlaufzeit.
-- **✂️ Integrierter Video-Cutter:**
-  - Start- und Endzeitpunkt auf die Zehntelsekunde genau trimmen, um gezielt Highlights, Drifts oder Überholmanöver zu rendern.
-- **✨ Raytracing-Shader Suite:**
-  - **RTGI (Global Illumination):** Physikalische Abprallbeleuchtung (Curbs, Gras, Leitplanken strahlen auf Asphalt und Lack ab).
-  - **SSR (Screen-Space Reflections):** Reflexionen mit Fresnel & Rauheit für nasse Rennstrecken und spiegelnden Lack.
-  - **RTAO (Ambient Occlusion):** Tiefe Kontaktschatten unter Fahrzeugen und an Curbs.
-- **🎨 Photorealismus & Feinschliff:**
-  - **Detail-Clarity (Anti-TAA):** Schärft verwaschene TAA-Kanten nach und holt Streckendetails hervor.
-  - **ACES Filmic Tonemapping & Optical Bloom:** Für kinoreifen Dynamikumfang und strahlende Scheinwerfer.
-  - **Subtiles Filmkorn:** Verhindert digitales Color-Banding.
-- **⏱️ Live Render-Monitor & ETA:**
-  - Fortschrittsbalken, Prozentanzeige, Frame-Zähler (`Frame X / Y`), Render-FPS und minutengenaue Restzeitanzeige (ETA).
-- **⚡ Hardware NVENC Export & 8K Ultra-Upscaling:**
+- **🖥️ Native Desktop-App (Kein Browser mehr nötig):**
+  - Eigenständige, moderne Windows-Oberfläche (Dark RTX Theme) mit direkter GPU-Hardware-Anbindung.
+- **🤖 Auto-Adaptive AI Preset (Echtzeit-Szenen-Optimierung):**
+  - Analysiert jedes Bild pro Millisekunde und berechnet dynamisch die perfekten Werte für RTGI-Streulicht, Nässe-Reflexionen (SSR), Kontaktschatten (RTAO) und Belichtung (mit butterweichem EMA-Filter gegen Flimmern).
+- **🎬 Interaktive Video-Vorschau mit integriertem Player:**
+  - Vorschau-Sequenz rendern und direkt in der App als flüssiges Video abspielen – mit Play/Pause, Timeline-Scrubbing und 50/50 Vorher/Nachher Split-Screen.
+- **🚀 Native GPU-Beschleunigung & 8K Ultra-Upscaling:**
+  - Optimiert für **NVIDIA GeForce RTX 3080 Ti** (12 GB VRAM), Turing (RTX 20) mit Low-VRAM Schutz sowie RTX 40 & 50.
   - Export von 1080p, 1440p, 4K bis hin zu **8K Ultra HD (7680x4320 / 4320p)** mit NVIDIA HEVC NVENC Hardware-Beschleunigung und 100 % Audio-Erhalt.
+- **📐 Video-Maße & Timeline-Cutter:**
+  - Automatische Erkennung von Auflösung, Seitenverhältnis (16:9, 21:9 Ultrawide, 32:9) und zehntelsekundengenauer Schnitt für Highlights.
 
 ---
 

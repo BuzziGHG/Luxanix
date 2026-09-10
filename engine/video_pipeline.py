@@ -23,6 +23,7 @@ from .depth_estimator import DepthEstimator
 from .raytracer import ScreenSpaceRaytracer
 from .denoiser import BilateralDenoiser
 from .postprocess import ColorGrader
+from .auto_preset import AutoSceneOptimizer
 
 
 def get_video_info(video_path: str) -> Dict[str, Any]:
@@ -113,6 +114,7 @@ class VideoPipeline:
         self.raytracer = ScreenSpaceRaytracer(device=self.device, dtype=self.dtype)
         self.denoiser = BilateralDenoiser(device=self.device)
         self.grader = ColorGrader(device=self.device)
+        self.auto_optimizer = AutoSceneOptimizer()
 
     def process_single_frame(
         self,
@@ -135,6 +137,10 @@ class VideoPipeline:
             frame_proc = cv2.resize(frame_rgb, (proc_w, proc_h), interpolation=cv2.INTER_AREA)
         else:
             frame_proc = frame_rgb
+
+        # Auto-Adaptive AI Preset (Dynamic Scene Optimizer per Frame/Millisecond)
+        if params.get("auto_preset", False):
+            params = self.auto_optimizer.analyze_and_optimize(frame_proc, None, params)
 
         # 1. Depth Estimation
         depth = self.depth_estimator.estimate_depth(frame_proc).to(device=self.device, dtype=self.dtype)
@@ -212,6 +218,8 @@ class VideoPipeline:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_duration = total_video_frames / fps if fps > 0 else 0.0
+
+        self.auto_optimizer.reset()
 
         # Trimming Handling
         enable_trim = params.get("enable_trim", False)

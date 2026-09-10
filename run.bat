@@ -17,13 +17,10 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-echo Starte Luxanix Studio Web-Interface...
-echo Die Benutzeroberflaeche oeffnet sich automatisch in deinem Standard-Browser.
-echo URL: http://127.0.0.1:7860
-echo Druecke Strg+C in diesem Fenster, um das Programm zu beenden.
+echo Starte native Luxanix Studio Desktop-App...
 echo.
 
-.venv\Scripts\python.exe ui\app.py
+.venv\Scripts\python.exe ui\desktop_app.py
 
 if %errorlevel% neq 0 (
     echo.
