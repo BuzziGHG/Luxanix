@@ -89,6 +89,7 @@ class LuxanixDesktopApp(ctk.CTk):
         self.music_volume = 1.0
         self.video_volume = 1.0
         self.mute_video_audio = False
+        self._resize_after_id = None  # debounce token for player resize re-render
 
         # Live telemetry metrics
         self.telemetry = {
@@ -630,7 +631,10 @@ class LuxanixDesktopApp(ctk.CTk):
             font=ctk.CTkFont(size=12),
             text_color="#475569"
         )
-        self.lbl_screen.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self.lbl_screen.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+
+        # Re-render current frame when the window/panel is resized so preview always fills the space
+        self.canvas_container.bind("<Configure>", self._on_player_resize)
 
         # Bottom Transport Bar
         transport_bar = ctk.CTkFrame(panel, fg_color="#12161d", height=40, corner_radius=0)
@@ -1533,16 +1537,36 @@ class LuxanixDesktopApp(ctk.CTk):
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
 
+    def _on_player_resize(self, event=None):
+        """Re-renders the current frame whenever the player container changes size,
+        so the preview always fills the available space edge-to-edge."""
+        if not self.is_playing and getattr(self, "video_path", None):
+            # Debounce: cancel any pending resize re-render, fire after 80ms idle
+            if hasattr(self, "_resize_after_id") and self._resize_after_id:
+                try:
+                    self.after_cancel(self._resize_after_id)
+                except Exception:
+                    pass
+            self._resize_after_id = self.after(80, lambda: self._render_single_frame_at(self.current_time_sec))
+
     def _display_image_on_screen(self, img_rgb):
-        cw = self.canvas_container.winfo_width() or 800
-        ch = self.canvas_container.winfo_height() or 500
+        # Get actual container dimensions — use the full available space
+        self.canvas_container.update_idletasks()
+        cw = self.canvas_container.winfo_width()
+        ch = self.canvas_container.winfo_height()
+        if cw < 10 or ch < 10:
+            cw, ch = 960, 540
 
         ih, iw = img_rgb.shape[:2]
-        scale = min((cw - 16) / iw, (ch - 16) / ih, 1.0)
+        # Scale to FILL the container (letterbox/pillarbox to keep aspect ratio)
+        # Remove the old 1.0 cap — always scale up to fit the player area
+        scale_w = cw / iw
+        scale_h = ch / ih
+        scale = min(scale_w, scale_h)   # letterbox: fit inside container
         target_w = max(1, int(iw * scale))
         target_h = max(1, int(ih * scale))
 
-        resized = cv2.resize(img_rgb, (target_w, target_h), interpolation=cv2.INTER_AREA)
+        resized = cv2.resize(img_rgb, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
         pil_img = Image.fromarray(resized)
         ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(target_w, target_h))
 
