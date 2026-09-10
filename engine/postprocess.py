@@ -86,6 +86,16 @@ class ColorGrader:
         if vignette_amount > 0.0:
             composited = self._apply_vignette(composited, vignette_amount)
 
+        # 9. Texture Clarity & Detail Sharpening (Anti-TAA Blur)
+        clarity = params.get("clarity", 0.3)
+        if clarity > 0.0:
+            composited = self._apply_clarity(composited, clarity)
+
+        # 10. Subtle Cinematic Film Grain (Reduces banding)
+        film_grain = params.get("film_grain", 0.0)
+        if film_grain > 0.0:
+            composited = self._apply_film_grain(composited, film_grain)
+
         return torch.clamp(composited, 0.0, 1.0)
 
     def _apply_saturation_vibrance(
@@ -167,3 +177,21 @@ class ColorGrader:
         dist_sq = (x * x + y * y) * 0.5
         vignette_mask = torch.clamp(1.0 - dist_sq * amount, min=0.0, max=1.0)
         return rgb * vignette_mask
+
+    def _apply_clarity(self, rgb: torch.Tensor, clarity: float) -> torch.Tensor:
+        """
+        Enhances edge crispness and micro-contrast using fast unsharp masking.
+        Effectively removes TAA (temporal anti-aliasing) motion blur in racing games.
+        """
+        kernel = (torch.tensor([[1, 2, 1], [2, 4, 2], [1, 2, 1]], device=self.device, dtype=rgb.dtype) / 16.0)
+        kernel = kernel.repeat(3, 1, 1, 1)
+        blurred = F.conv2d(rgb, kernel, padding=1, groups=3)
+        high_pass = rgb - blurred
+        return torch.clamp(rgb + high_pass * clarity, min=0.0)
+
+    def _apply_film_grain(self, rgb: torch.Tensor, amount: float) -> torch.Tensor:
+        """
+        Adds subtle cinematographic film grain to eliminate digital color banding.
+        """
+        noise = (torch.rand_like(rgb) - 0.5) * 2.0 * amount
+        return torch.clamp(rgb + noise, min=0.0, max=1.0)

@@ -3,25 +3,26 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "simrtx-studio"
+name = "luxanix"
 version = "1.0.0"
-description = "AI-powered Screen-Space Ray Tracing & Photorealistic Remaster Studio for Simracing & Gaming Videos"
+description = "Luxanix Studio — AI-powered Raytracing, Video Cutter & Photorealistic Remaster for Simracing & Gaming"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "SimRTX Team" }
+    { name = "BuzziGHG" }
 ]
 keywords = [
+    "luxanix",
     "raytracing",
     "rtx",
     "simracing",
-    "assetto-corsa",
+    "video-editor",
+    "video-enhancement",
     "depth-anything",
     "global-illumination",
     "ssr",
     "rtao",
-    "video-processing",
     "nvenc"
 ]
 dependencies = [
@@ -40,5 +41,5 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-username/simrtx-studio"
-Repository = "https://github.com/your-username/simrtx-studio.git"
+Homepage = "https://github.com/BuzziGHG/Luxanix"
+Repository = "https://github.com/BuzziGHG/Luxanix.git"

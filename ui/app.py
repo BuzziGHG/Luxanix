@@ -1,20 +1,28 @@
 """
-SimRTX Studio - Modern User Interface
-Dark RTX / Simracing Themed Studio for Ray Tracing and Color Grading Video Reworks.
-Supports Multi-Generation NVIDIA GPUs (RTX 20-Series, 30-Series, 40-Series, and 50-Series).
+Luxanix Studio — AI Raytracing & Photorealistic Video Remaster
+Sleek, dark, GPU-accelerated video enhancement tool for Gaming & Simracing.
+Features:
+- Video metadata inspection (resolution, aspect ratio, fps, duration)
+- Video timeline trimming & cutting (render only the best racing moments)
+- Screen-Space Ray Tracing (RTGI, SSR, RTAO)
+- AI Photorealism & Detail Clarity (Anti-TAA blur, ACES Tonemapping, Bloom, Film Grain)
+- Realtime Render Monitor with Frame Count, Progress Bar, FPS, and ETA countdown
+- Multi-Generation GPU support (RTX 20, 30, 40, and 50-Series)
 """
 
 import os
 import json
+import math
+import time
 import cv2
 import numpy as np
 import torch
 import gradio as gr
 from PIL import Image
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 
 from engine.depth_estimator import DepthEstimator
-from engine.video_pipeline import VideoPipeline
+from engine.video_pipeline import VideoPipeline, get_video_info
 from engine.hardware import detect_gpu_hardware, get_profile_settings, HARDWARE_PROFILES
 
 # Load Presets
@@ -25,7 +33,7 @@ if os.path.exists(PRESETS_PATH):
 else:
     PRESETS = {}
 
-# Global GPU Profile & Engine Pipeline Singleton
+# Global Hardware Profile & Engine Singleton
 GPU_INFO = detect_gpu_hardware()
 PIPELINE = None
 
@@ -43,12 +51,69 @@ def get_gpu_badge_html():
             f"🟢 <b>GPU:</b> {GPU_INFO.device_name} | "
             f"<b>Architektur:</b> {GPU_INFO.generation} | "
             f"<b>VRAM:</b> {GPU_INFO.vram_gb:.1f} GB | "
-            f"<b>Auto-Profil:</b> {GPU_INFO.recommended_profile.upper()}"
+            f"<b>Profil:</b> {GPU_INFO.recommended_profile.upper()}"
         )
     return "⚠️ Warnung: Keine CUDA GPU gefunden. CPU-Software-Modus aktiv."
 
 
-def extract_frame_from_video(video_path: str, timestamp_sec: float) -> np.ndarray:
+def on_video_upload(video_path: Optional[str]):
+    """Reads video file metadata and configures the trimming sliders and stats badge."""
+    if not video_path or not os.path.exists(video_path):
+        return (
+            "<div class='stats-card'>Kein Video geladen. Lade ein Gaming- oder Simracing-Video hoch.</div>",
+            gr.update(maximum=60.0, value=0.0),
+            gr.update(maximum=60.0, value=60.0),
+            gr.update(maximum=60.0, value=2.0),
+            "00:00 bis 00:00 (0.0s)"
+        )
+
+    info = get_video_info(video_path)
+    dur = info.get("duration_sec", 60.0)
+
+    html_stats = f"""
+    <div class='stats-card'>
+        <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;'>
+            <div><span class='stat-label'>Auflösung</span><br><b>{info.get('resolution_label', 'Unbekannt')}</b></div>
+            <div><span class='stat-label'>Format</span><br><b>{info.get('aspect_ratio', '16:9')}</b></div>
+            <div><span class='stat-label'>Framerate</span><br><b>{info.get('fps', 30.0)} FPS</b></div>
+            <div><span class='stat-label'>Dauer</span><br><b>{info.get('duration_str', '00:00')}</b></div>
+            <div><span class='stat-label'>Frames</span><br><b>{info.get('total_frames', 0):,} Frames</b></div>
+        </div>
+    </div>
+    """
+
+    preview_default = min(2.0, dur)
+    trim_summary = f"Volle Videolänge: 00:00 bis {info.get('duration_str', '00:00')}"
+
+    return (
+        html_stats,
+        gr.update(maximum=dur, value=0.0),
+        gr.update(maximum=dur, value=dur),
+        gr.update(maximum=dur, value=preview_default),
+        trim_summary
+    )
+
+
+def update_trim_label(start_sec: float, end_sec: float, video_path: Optional[str]):
+    """Computes and updates the cut duration text."""
+    if end_sec <= start_sec:
+        return "⚠️ Fehler: Endzeitpunkt muss nach dem Startzeitpunkt liegen!"
+
+    diff_sec = end_sec - start_sec
+    m_start, s_start = int(start_sec // 60), int(start_sec % 60)
+    m_end, s_end = int(end_sec // 60), int(end_sec % 60)
+    m_diff, s_diff = int(diff_sec // 60), int(diff_sec % 60)
+
+    fps = 30.0
+    if video_path and os.path.exists(video_path):
+        info = get_video_info(video_path)
+        fps = info.get("fps", 30.0)
+
+    frames = int(diff_sec * fps)
+    return f"✂️ Schnittbereich: {m_start:02d}:{s_start:02d} bis {m_end:02d}:{s_end:02d} | Rendern: {m_diff:02d}:{s_diff:02d} Min ({diff_sec:.1f}s / ~{frames:,} Frames)"
+
+
+def extract_frame_at_time(video_path: str, timestamp_sec: float) -> np.ndarray:
     """Extracts a single frame from video at given timestamp."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -61,7 +126,6 @@ def extract_frame_from_video(video_path: str, timestamp_sec: float) -> np.ndarra
     cap.release()
 
     if not ret or frame_bgr is None:
-        # Fallback to frame 0
         cap = cv2.VideoCapture(video_path)
         ret, frame_bgr = cap.read()
         cap.release()
@@ -75,7 +139,7 @@ def extract_frame_from_video(video_path: str, timestamp_sec: float) -> np.ndarra
 def apply_preset_to_sliders(preset_name: str):
     """Returns updated slider values based on selected preset."""
     if preset_name not in PRESETS:
-        return [gr.skip()] * 18
+        return [gr.skip()] * 20
 
     p = PRESETS[preset_name]
     return [
@@ -96,6 +160,8 @@ def apply_preset_to_sliders(preset_name: str):
         p.get("bloom_threshold", 0.78),
         p.get("use_aces", True),
         p.get("vignette", 0.1),
+        p.get("clarity", 0.35),
+        p.get("film_grain", 0.02),
         p.get("denoise", True),
     ]
 
@@ -143,16 +209,16 @@ def process_preview_frame(
     bloom_threshold,
     use_aces,
     vignette,
+    clarity,
+    film_grain,
     denoise,
 ):
-    """Processes a single frame and returns comparison slider plus diagnostics."""
-    # Determine input frame
+    """Processes a single preview frame and returns comparison slider."""
     if input_image is not None:
         frame_rgb = np.array(input_image)
     elif video_file is not None:
-        frame_rgb = extract_frame_from_video(video_file, video_timestamp)
+        frame_rgb = extract_frame_at_time(video_file, video_timestamp)
     else:
-        # Synthetic test frame if nothing provided
         frame_rgb = np.zeros((720, 1280, 3), dtype=np.uint8)
         frame_rgb[360:, :] = [40, 42, 45]
         frame_rgb[:360, :] = [80, 140, 210]
@@ -180,9 +246,10 @@ def process_preview_frame(
         "bloom_threshold": float(bloom_threshold),
         "use_aces": bool(use_aces),
         "vignette": float(vignette),
+        "clarity": float(clarity),
+        "film_grain": float(film_grain),
         "denoise": bool(denoise),
     }
-    # Merge hardware optimizations (rtao_samples, ssr_steps, max_internal_res)
     for k, v in prof_settings.items():
         if k not in params:
             params[k] = v
@@ -197,6 +264,12 @@ def process_preview_frame(
 def render_full_video(
     video_file,
     hardware_profile_choice,
+    enable_trim,
+    trim_start,
+    trim_end,
+    output_resolution,
+    encoder_codec,
+    bitrate_mbps,
     rtgi_intensity,
     rtgi_range,
     rtgi_steps,
@@ -214,10 +287,12 @@ def render_full_video(
     bloom_threshold,
     use_aces,
     vignette,
+    clarity,
+    film_grain,
     denoise,
-    progress=gr.Progress(),
+    progress=gr.Progress(track_tqdm=False),
 ):
-    """Renders the full video with ray tracing and hardware NVENC encoding."""
+    """Renders the full or cut video with detailed live ETA, speed, and status."""
     if video_file is None:
         raise gr.Error("Bitte lade zuerst ein Video hoch!")
 
@@ -225,6 +300,12 @@ def render_full_video(
     prof_settings = get_profile_settings(prof_key)
 
     params = {
+        "enable_trim": bool(enable_trim),
+        "trim_start": float(trim_start),
+        "trim_end": float(trim_end),
+        "output_resolution": output_resolution,
+        "encoder_codec": "hevc_nvenc" if "HEVC" in encoder_codec else "h264_nvenc",
+        "bitrate_mbps": int(bitrate_mbps),
         "rtgi_intensity": float(rtgi_intensity),
         "rtgi_range": float(rtgi_range),
         "rtgi_steps": int(rtgi_steps),
@@ -242,23 +323,35 @@ def render_full_video(
         "bloom_threshold": float(bloom_threshold),
         "use_aces": bool(use_aces),
         "vignette": float(vignette),
+        "clarity": float(clarity),
+        "film_grain": float(film_grain),
         "denoise": bool(denoise),
     }
     for k, v in prof_settings.items():
         if k not in params:
             params[k] = v
 
-    output_dir = os.path.join(os.path.expanduser("~"), "Videos", "SimRTX_Renders")
+    output_dir = os.path.join(os.path.expanduser("~"), "Videos", "Luxanix_Renders")
     os.makedirs(output_dir, exist_ok=True)
 
     base_name = os.path.splitext(os.path.basename(video_file))[0]
-    out_file = os.path.join(output_dir, f"{base_name}_RTX_Overhauled.mp4")
+    out_file = os.path.join(output_dir, f"{base_name}_Luxanix_RTX.mp4")
 
     pipeline = get_pipeline()
 
-    def update_progress(curr, total, fps, eta):
+    def update_progress(curr, total, fps, eta, elapsed):
         prog = curr / total if total > 0 else 0.0
-        progress(prog, desc=f"Frame {curr}/{total} | {fps:.1f} FPS | Restzeit: {eta:.0f}s")
+        pct = prog * 100.0
+        m_eta, s_eta = int(eta // 60), int(eta % 60)
+        m_el, s_el = int(elapsed // 60), int(elapsed % 60)
+
+        desc_str = (
+            f"[{pct:.1f}%] Frame {curr}/{total} | "
+            f"Speed: {fps:.1f} FPS | "
+            f"Verstrichen: {m_el:02d}:{s_el:02d} | "
+            f"Restzeit: {m_eta:02d}:{s_eta:02d} Min"
+        )
+        progress(prog, desc=desc_str)
 
     rendered_path = pipeline.process_video(
         input_path=video_file,
@@ -267,55 +360,71 @@ def render_full_video(
         progress_callback=update_progress,
     )
 
-    return rendered_path, f"✅ Video erfolgreich fertig gerendert: {rendered_path}"
+    return rendered_path, f"✅ Video erfolgreich gerendert & gespeichert in:\n{rendered_path}"
 
 
 custom_css = """
 body, .gradio-container {
-    background-color: #0d0f12 !important;
-    color: #e0e6ed !important;
+    background-color: #0b0d10 !important;
+    color: #e4e9f0 !important;
     font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif !important;
 }
-.rtx-title {
-    background: linear-gradient(90deg, #76b900, #00f3ff);
+.lux-title {
+    background: linear-gradient(90deg, #00f3ff 0%, #76b900 60%, #00ff88 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    font-size: 2.3rem !important;
-    font-weight: 800 !important;
+    font-size: 2.4rem !important;
+    font-weight: 900 !important;
     margin-bottom: 2px !important;
+    letter-spacing: -0.5px;
 }
 .gpu-badge {
-    background-color: #1a231d;
+    background-color: #121815;
     border: 1px solid #76b900;
     color: #8ce600;
-    padding: 6px 14px;
-    border-radius: 6px;
+    padding: 8px 16px;
+    border-radius: 8px;
     font-size: 0.95rem;
     font-weight: 600;
     display: inline-block;
     margin-bottom: 12px;
 }
+.stats-card {
+    background: #14171d;
+    border: 1px solid #28303d;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+}
+.stat-label {
+    color: #8c9ba5;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
 .gr-button-primary {
     background: linear-gradient(135deg, #76b900 0%, #5b9200 100%) !important;
     border: none !important;
     color: #000 !important;
-    font-weight: 700 !important;
-    font-size: 1.05rem !important;
+    font-weight: 800 !important;
+    font-size: 1.1rem !important;
+    padding: 12px 20px !important;
 }
 .gr-button-primary:hover {
-    filter: brightness(1.15) !important;
+    filter: brightness(1.2) !important;
+    box-shadow: 0 0 15px rgba(118, 185, 0, 0.4) !important;
 }
 """
 
 
 def build_app():
-    with gr.Blocks(title="SimRTX Studio | Raytracing Video Remaster") as demo:
+    with gr.Blocks(title="Luxanix Studio | RTX Video Remaster") as demo:
         gr.HTML(
             f"""
-            <div style="padding: 10px 0;">
-                <h1 class="rtx-title">⚡ SimRTX Studio — Raytracing Video Remaster</h1>
-                <p style="color: #8c9ba5; font-size: 1.05rem; margin-top: 0;">
-                    Photorealistisches Screen-Space Raytracing (RTGI, SSR, RTAO) & Color-Grading für Simracing- und Gaming-Videos.
+            <div style="padding: 12px 0 6px 0;">
+                <h1 class="lux-title">⚡ LUXANIX STUDIO — RTX RAYTRACING & VIDEO REMASTER</h1>
+                <p style="color: #94a3b8; font-size: 1.05rem; margin-top: 0;">
+                    Professionelles Screen-Space Raytracing, AI-Detailverbesserung, Video-Trimming & Hardware NVENC-Export.
                 </p>
                 <div class="gpu-badge">{get_gpu_badge_html()}</div>
             </div>
@@ -323,21 +432,27 @@ def build_app():
         )
 
         with gr.Row():
-            # Left Column: Inputs & Controls
+            # Left Column: Inputs, Cutter & Tuning Controls
             with gr.Column(scale=4):
-                with gr.Tab("📁 Video- & Frame-Import"):
+                with gr.Tab("📁 1. Video-Import & Maße"):
                     video_input = gr.Video(label="Simracing / Gaming Video hochladen", sources=["upload"])
-                    video_timestamp = gr.Slider(
-                        minimum=0.0, maximum=300.0, value=2.0, step=0.5,
-                        label="Vorschau-Zeitpunkt (Sekunden im Video)"
-                    )
-                    image_input = gr.Image(
-                        label="Oder Screenshot / Einzelbild einfügen",
-                        type="pil",
-                        sources=["upload", "clipboard"]
+                    video_stats_html = gr.HTML(
+                        "<div class='stats-card'>Lade ein Video hoch, um Auflösung, Format, FPS und Dauer anzuzeigen.</div>"
                     )
 
-                with gr.Tab("⚙️ GPU-Hardware & VRAM"):
+                with gr.Tab("✂️ 2. Video Schneiden & Trimmen"):
+                    enable_trim = gr.Checkbox(value=False, label="✂️ Zuschneiden aktivieren (Nur Highlight rendern)")
+                    with gr.Row():
+                        trim_start = gr.Slider(0.0, 300.0, value=0.0, step=0.5, label="Startpunkt (Sekunden)")
+                        trim_end = gr.Slider(0.0, 300.0, value=60.0, step=0.5, label="Endpunkt (Sekunden)")
+                    trim_info_label = gr.Markdown("Volle Videolänge wird gerendert.")
+
+                with gr.Tab("🎨 3. Presets & GPU"):
+                    preset_dropdown = gr.Dropdown(
+                        choices=list(PRESETS.keys()),
+                        value="Simracing: Wet Track & Reflections" if "Simracing: Wet Track & Reflections" in PRESETS else None,
+                        label="Shader- & Look-Preset"
+                    )
                     hw_choices = [
                         f"Automatisch ({GPU_INFO.generation} - {GPU_INFO.recommended_profile.upper()})",
                         "RTX 20-Serie / 6-8 GB VRAM (Performance & Memory-Saver)",
@@ -351,114 +466,139 @@ def build_app():
                         info="Wähle deine GPU-Klasse, um Speicherverbrauch und Render-Geschwindigkeit optimal abzustimmen."
                     )
 
-                with gr.Tab("🎨 Presets & Profile"):
-                    preset_dropdown = gr.Dropdown(
-                        choices=list(PRESETS.keys()),
-                        value="Simracing: Wet Track & Reflections" if "Simracing: Wet Track & Reflections" in PRESETS else None,
-                        label="Shader-Preset auswählen"
-                    )
-
                 with gr.Accordion("✨ Raytracing-Shader Einstellungen (RTX Core)", open=True):
                     rtgi_intensity = gr.Slider(0.0, 2.0, value=0.65, step=0.05, label="RTGI: Indirektes Licht (Bounce Light)")
                     rtgi_range = gr.Slider(1.0, 10.0, value=4.0, step=0.5, label="RTGI: Licht-Reichweite (Radius)")
                     rtgi_steps = gr.Slider(4, 24, value=10, step=1, label="RTGI: Raymarching Samples / Qualität")
 
-                    gr.HTML("<hr style='border-color: #2a2e35; margin: 10px 0;'>")
+                    gr.HTML("<hr style='border-color: #242b35; margin: 10px 0;'>")
                     ssr_intensity = gr.Slider(0.0, 2.0, value=0.5, step=0.05, label="SSR: Reflexionen (Asphalt / Lack / Wasser)")
                     roughness = gr.Slider(0.01, 1.0, value=0.22, step=0.02, label="SSR: Oberflächen-Rauheit (Glossiness)")
                     wet_track_mode = gr.Checkbox(value=False, label="🌧️ Nasse Strecke Modus (Boostet Bodenreflexionen)")
 
-                    gr.HTML("<hr style='border-color: #2a2e35; margin: 10px 0;'>")
+                    gr.HTML("<hr style='border-color: #242b35; margin: 10px 0;'>")
                     rtao_intensity = gr.Slider(0.0, 1.5, value=0.8, step=0.05, label="RTAO: Kontaktschatten (Chassis / Radkästen)")
                     rtao_radius = gr.Slider(0.5, 4.0, value=1.3, step=0.1, label="RTAO: Schatten-Radius")
                     denoise = gr.Checkbox(value=True, label="Kanten-erhaltendes Denoising (Kein Flimmern)")
 
-                with gr.Accordion("🌈 Feintuning & Color-Grading (CapCut-Killer)", open=True):
+                with gr.Accordion("💎 Photorealismus & Detail-Clarity (Anti-Blur)", open=True):
+                    clarity = gr.Slider(0.0, 1.0, value=0.35, step=0.05, label="Detail-Klarheit (Entfernt TAA-Bewegungsunschärfe)")
+                    film_grain = gr.Slider(0.0, 0.1, value=0.02, step=0.005, label="Subtiles Filmkorn (Beseitigt Farb-Banding)")
+                    bloom_intensity = gr.Slider(0.0, 1.0, value=0.2, step=0.02, label="Bloom: Scheinwerfer & Glanz-Glow")
+                    bloom_threshold = gr.Slider(0.5, 0.95, value=0.78, step=0.02, label="Bloom-Schwellenwert")
+                    use_aces = gr.Checkbox(value=True, label="ACES Filmic Tone Mapping (Kino-Kontrast)")
+
+                with gr.Accordion("🌈 Farbstimmung & Feintuning (Color-Grading)", open=False):
                     saturation = gr.Slider(0.0, 2.5, value=1.18, step=0.02, label="Sättigung (Saturation)")
                     vibrance = gr.Slider(-0.5, 1.0, value=0.2, step=0.05, label="Dynamik (Smart Vibrance)")
                     contrast = gr.Slider(0.5, 2.0, value=1.1, step=0.02, label="Kontrast (S-Curve)")
                     exposure = gr.Slider(-2.0, 2.0, value=0.05, step=0.05, label="Belichtung (Exposure EV)")
                     temperature = gr.Slider(-1.0, 1.0, value=0.0, step=0.05, label="Farbtemperatur (Kalt 🔵 / Warm 🟠)")
-                    bloom_intensity = gr.Slider(0.0, 1.0, value=0.2, step=0.02, label="Bloom: Scheinwerfer & Glanz-Glow")
-                    bloom_threshold = gr.Slider(0.5, 0.95, value=0.78, step=0.02, label="Bloom-Schwellenwert")
-                    use_aces = gr.Checkbox(value=True, label="ACES Filmic Tone Mapping (Kino-Kontrast)")
                     vignette = gr.Slider(0.0, 0.6, value=0.12, step=0.02, label="Vignette (Randabdunklung)")
 
-                btn_preview = gr.Button("⚡ Vorschau-Frame Aktualisieren", variant="primary")
+                with gr.Row():
+                    video_timestamp = gr.Slider(0.0, 300.0, value=2.0, step=0.5, label="Vorschau-Sekunde")
+                    btn_preview = gr.Button("⚡ Vorschau-Frame Aktualisieren", variant="primary")
 
-            # Right Column: Live Comparison & Video Export
+            # Right Column: Live Comparison & Export
             with gr.Column(scale=6):
                 with gr.Tab("👁️ Interaktiver Vorher / Nachher Vergleich"):
                     preview_slider = gr.ImageSlider(
-                        label="Ziehe den Regler, um den Raytracing-Unterschied zu sehen!",
+                        label="Ziehe den Regler, um den Unterschied vor und nach dem Raytracing zu sehen!",
                         show_label=True,
                         type="pil",
                     )
-
                     with gr.Accordion("🔍 AI-Tiefenkarte & Normalen anzeigen (Diagnose)", open=False):
                         with gr.Row():
-                            depth_view = gr.Image(label="AI-Rekonstruierte Tiefenkarte (Depth Anything v2)")
-                            normals_view = gr.Image(label="Oberflächen-Normalenvektoren (3D-Geometrie)")
+                            depth_view = gr.Image(label="AI-Tiefenkarte (Depth Anything v2)")
+                            normals_view = gr.Image(label="3D-Normalenvektoren (Oberflächen-Ausrichtung)")
 
-                with gr.Tab("🎬 Komplettes Video Rendern"):
-                    gr.Markdown("### Berechne den finalen Clip mit RTX NVENC Hardware-Beschleunigung")
-                    gr.Markdown("Alle Audio-Spuren (Motor-Sound, Reifenquietschen, Spotter) bleiben erhalten!")
+                with gr.Tab("🎬 Video Rendern & Export"):
+                    gr.Markdown("### 🚀 Export-Einstellungen (NVIDIA NVENC Beschleunigung)")
+                    with gr.Row():
+                        output_resolution = gr.Dropdown(
+                            choices=["Original", "1080p Full HD", "1440p 2K QHD", "4K Ultra HD"],
+                            value="Original",
+                            label="Ausgabe-Auflösung"
+                        )
+                        encoder_codec = gr.Dropdown(
+                            choices=["H.264 (NVIDIA NVENC - Maximale Kompatibilität)", "HEVC / H.265 (NVIDIA NVENC - Höchste Effizienz)"],
+                            value="H.264 (NVIDIA NVENC - Maximale Kompatibilität)",
+                            label="Video-Codec"
+                        )
+                        bitrate_mbps = gr.Slider(10, 80, value=35, step=5, label="Bitrate (Mbps)")
 
                     btn_render_video = gr.Button("🚀 Starte Video-Raytracing Export", variant="primary", size="lg")
-                    render_status = gr.Textbox(label="Status & Speicherort", interactive=False)
-                    rendered_video_output = gr.Video(label="Fertiges RTX-Video")
+                    render_status = gr.Textbox(label="Live Render-Status & Speicherort", interactive=False, lines=2)
+                    rendered_video_output = gr.Video(label="Fertig gerendertes Video (mit Original-Audio)")
 
-                with gr.Tab("ℹ️ Grafikkarten-Kompatibilität & Generationen"):
+                with gr.Tab("ℹ️ Grafikkarte & Generationen"):
                     gr.Markdown(
                         """
-                        ### 🎮 Unterstützte Grafikkarten-Generationen
+                        ### 🎮 Unterstützte Grafikkarten-Generationen in Luxanix
                         
-                        SimRTX Studio passt sich automatisch an deine NVIDIA Grafikkarte an:
-                        
-                        - **Ältere Generationen (Turing - RTX 20-Serie):**
-                          - *Karten:* RTX 2060 (6GB / 12GB), RTX 2070, RTX 2080, RTX 2080 Ti
-                          - *Optimierungen:* Automatisches Memory-Management, adaptive interne Skalierung gegen VRAM-Überlauf, effizientes FP16-Raymarching, Turing-NVENC (`preset p4`).
-                        
-                        - **Aktuelle Generation (Ampere - RTX 30-Serie):**
-                          - *Karten:* RTX 3060, 3070, 3080, **3080 Ti (deine Karte)**, RTX 3090
-                          - *Optimierungen:* Schnelle 2. Gen RT Cores + 3. Gen Tensor Cores, Ampere NVENC, bis zu 4K Auflösung.
-                        
-                        - **Neue & zukünftige Generationen (Ada Lovelace / Blackwell):**
-                          - *Karten:* RTX 4060, 4070, 4080, 4090 sowie kommende RTX 50-Serie
-                          - *Optimierungen:* AV1 / Dual-NVENC Enkodierung, maximale Raymarching-Sampledichte (Ultra Profile).
+                        - **Turing (RTX 20-Serie):** RTX 2060 (6GB/12GB), RTX 2070, RTX 2080 (Low-VRAM Profil mit automatischer Speicherschonung).
+                        - **Ampere (RTX 30-Serie):** RTX 3060, 3070, 3080, **RTX 3080 Ti (deine Karte)**, RTX 3090.
+                        - **Ada Lovelace (RTX 40-Serie):** RTX 4060, 4070, 4080, 4090.
+                        - **Blackwell (RTX 50-Serie):** Zukunftssicher vorbereitet für Compute 9.0+ & nächste Tensor Cores.
                         """
                     )
+
+        # Wire Up Events
+        # Video Upload -> Update Metadata, Trimming Sliders
+        video_input.change(
+            fn=on_video_upload,
+            inputs=[video_input],
+            outputs=[video_stats_html, trim_start, trim_end, video_timestamp, trim_info_label]
+        )
+
+        # Trimming Sliders -> Update Trim Summary
+        for t_ctrl in [trim_start, trim_end]:
+            t_ctrl.change(
+                fn=update_trim_label,
+                inputs=[trim_start, trim_end, video_input],
+                outputs=[trim_info_label]
+            )
 
         all_sliders = [
             rtgi_intensity, rtgi_range, rtgi_steps,
             ssr_intensity, roughness, wet_track_mode,
             rtao_intensity, rtao_radius,
             exposure, contrast, saturation, vibrance, temperature,
-            bloom_intensity, bloom_threshold, use_aces, vignette, denoise
+            bloom_intensity, bloom_threshold, use_aces, vignette,
+            clarity, film_grain, denoise
         ]
 
-        # Preset change handler
         preset_dropdown.change(
             fn=apply_preset_to_sliders,
             inputs=[preset_dropdown],
             outputs=all_sliders
         )
 
-        # Hardware Profile change handler
         hardware_profile_choice.change(
             fn=on_hardware_profile_change,
             inputs=[hardware_profile_choice],
             outputs=[rtgi_steps, rtao_radius]
         )
 
-        preview_inputs = [image_input, video_input, video_timestamp, hardware_profile_choice] + all_sliders
+        preview_inputs = [gr.State(None), video_input, video_timestamp, hardware_profile_choice] + all_sliders
         btn_preview.click(
             fn=process_preview_frame,
             inputs=preview_inputs,
             outputs=[preview_slider, depth_view, normals_view]
         )
 
-        render_inputs = [video_input, hardware_profile_choice] + all_sliders
+        render_inputs = [
+            video_input,
+            hardware_profile_choice,
+            enable_trim,
+            trim_start,
+            trim_end,
+            output_resolution,
+            encoder_codec,
+            bitrate_mbps
+        ] + all_sliders
+
         btn_render_video.click(
             fn=render_full_video,
             inputs=render_inputs,

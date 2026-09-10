@@ -1,9 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title SimRTX Studio - 1-Klick Installer (NVIDIA RTX 3080 Ti)
+title Luxanix Studio - 1-Klick Installer
 
 echo ================================================================
-echo         SimRTX Studio - Installation & Umgebungseinrichtung
+echo         LUXANIX STUDIO — INSTALLATION & SETUP
+echo       Multi-GPU Raytracing & Video Remaster Studio
 echo ================================================================
 echo.
 echo [1/4] Ueberpruefe uv Package Manager...
@@ -12,7 +13,7 @@ if %errorlevel% neq 0 (
     if exist "%USERPROFILE%\.local\bin\uv.exe" (
         set "PATH=%USERPROFILE%\.local\bin;%PATH%"
     ) else (
-        echo [INFO] uv wird heruntergeladen und installiert...
+        echo [INFO] uv wird heruntergeladen und eingerichtet...
         powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
         set "PATH=%USERPROFILE%\.local\bin;%PATH%"
     )
@@ -27,7 +28,7 @@ if not exist ".venv" (
 echo [3/4] Installiere PyTorch mit CUDA 12.4 & RTX Beschleunigung...
 uv pip install --python .venv\Scripts\python.exe torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
-echo [4/4] Installiere SimRTX Studio Bibliotheken (Gradio, OpenCV, Transformers)...
+echo [4/4] Installiere Luxanix Studio Bibliotheken (Gradio, OpenCV, Transformers)...
 uv pip install --python .venv\Scripts\python.exe numpy opencv-python pillow gradio transformers accelerate timm imageio imageio-ffmpeg tqdm
 
 echo.

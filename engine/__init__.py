@@ -8,7 +8,7 @@ from .geometry import compute_normals, reconstruct_positions
 from .raytracer import ScreenSpaceRaytracer
 from .denoiser import BilateralDenoiser
 from .postprocess import ColorGrader
-from .video_pipeline import VideoPipeline
+from .video_pipeline import VideoPipeline, get_video_info
 from .hardware import detect_gpu_hardware, get_profile_settings, GPUHardwareProfile
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     "BilateralDenoiser",
     "ColorGrader",
     "VideoPipeline",
+    "get_video_info",
     "detect_gpu_hardware",
     "get_profile_settings",
     "GPUHardwareProfile",

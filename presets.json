@@ -17,6 +17,8 @@
     "bloom_threshold": 0.75,
     "use_aces": true,
     "vignette": 0.15,
+    "clarity": 0.4,
+    "film_grain": 0.02,
     "denoise": true
   },
   "Simracing: Golden Hour Sunset": {
@@ -37,6 +39,8 @@
     "bloom_threshold": 0.7,
     "use_aces": true,
     "vignette": 0.2,
+    "clarity": 0.35,
+    "film_grain": 0.02,
     "denoise": true
   },
   "Simracing: Nürburgring Overcast": {
@@ -57,6 +61,8 @@
     "bloom_threshold": 0.82,
     "use_aces": true,
     "vignette": 0.1,
+    "clarity": 0.45,
+    "film_grain": 0.015,
     "denoise": true
   },
   "Simracing: Night Race & Headlights": {
@@ -77,6 +83,8 @@
     "bloom_threshold": 0.65,
     "use_aces": true,
     "vignette": 0.25,
+    "clarity": 0.35,
+    "film_grain": 0.03,
     "denoise": true
   },
   "Assetto Corsa / ACC Hyper-Realism": {
@@ -97,6 +105,8 @@
     "bloom_threshold": 0.78,
     "use_aces": true,
     "vignette": 0.12,
+    "clarity": 0.45,
+    "film_grain": 0.02,
     "denoise": true
   },
   "Subtle Clean RTX Boost": {
@@ -117,6 +127,8 @@
     "bloom_threshold": 0.85,
     "use_aces": true,
     "vignette": 0.05,
+    "clarity": 0.3,
+    "film_grain": 0.01,
     "denoise": true
   }
 }
