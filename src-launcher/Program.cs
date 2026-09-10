@@ -161,7 +161,7 @@ namespace LuxanixLauncher
         // =====================================================================
         private void InitializeSetupWizard()
         {
-            this.Text = "Luxanix Studio Setup — Version 1.1.0 (NVIDIA RTX 50 Ready)";
+            this.Text = "Luxanix Studio Setup — Version 2.0.0 (CapCut Pro NLE Edition)";
             this.Size = new Size(680, 480);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -190,7 +190,7 @@ namespace LuxanixLauncher
 
             Label lblSideBadge = new Label()
             {
-                Text = "v1.1.0 RTX 50 Ready",
+                Text = "v2.0.0 CapCut Pro",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(118, 185, 0),
                 BackColor = Color.FromArgb(20, 32, 20),
@@ -826,8 +826,8 @@ namespace LuxanixLauncher
                 {
                     if (key != null)
                     {
-                        key.SetValue("DisplayName", "Luxanix Studio — AI Raytracing & 8K Video Remaster");
-                        key.SetValue("DisplayVersion", "1.1.0");
+                        key.SetValue("DisplayName", "Luxanix Studio Pro — CapCut AI Video Editor");
+                        key.SetValue("DisplayVersion", "2.0.0");
                         key.SetValue("Publisher", "BuzziGHG");
                         key.SetValue("InstallLocation", targetDir);
                         key.SetValue("DisplayIcon", exePath);

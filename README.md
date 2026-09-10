@@ -1,14 +1,15 @@
-# ⚡ LUXANIX STUDIO PRO — v1.1.0
+# ⚡ LUXANIX STUDIO PRO — v2.0.0 (CapCut Pro NLE Edition)
 
-[![Aktuelle Version](https://img.shields.io/badge/Version-v1.1.0%20(CapCut%20%2B%20Blackwell%20Setup)-76b900.svg?style=for-the-badge&logo=github)](https://github.com/BuzziGHG/Luxanix/releases/latest)
-[![Download Luxanix-Setup.exe](https://img.shields.io/badge/📥%20Download-Luxanix--Setup.exe%20(v1.1.0)-00c4cc.svg?style=for-the-badge&logo=windows)](https://github.com/BuzziGHG/Luxanix/releases/latest)
+[![Aktuelle Version](https://img.shields.io/badge/Version-v2.0.0%20(CapCut%20Pro%20%2B%20Blackwell)-76b900.svg?style=for-the-badge&logo=github)](https://github.com/BuzziGHG/Luxanix/releases/latest)
+[![Download Luxanix-Setup.exe](https://img.shields.io/badge/📥%20Download-Luxanix--Setup.exe%20(v2.0.0)-00c4cc.svg?style=for-the-badge&logo=windows)](https://github.com/BuzziGHG/Luxanix/releases/latest)
 [![NVIDIA RTX 50 Ready](https://img.shields.io/badge/NVIDIA%20RTX-50%20%7C%2040%20%7C%2030%20%7C%2020%20Series-76b900.svg?logo=nvidia)](https://www.nvidia.com)
 [![PyTorch CUDA](https://img.shields.io/badge/PyTorch-CUDA%2012.4-EE4C2C.svg?logo=pytorch)](https://pytorch.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Professionelles CapCut-inspiriertes Videoschnitt- & Remastering-Studio mit echtem NVIDIA Tensor-Core Raytracing (RTGI, SSR, RTAO), Auto-Adaptivem AI-Preset, nativer Desktop-App, 8K Ultra HD Upscaling und dauerhafter Windows-Installation via Setup-Assistent.**
+> **Professionelles CapCut-inspiriertes Videoschnitt- & Remastering-Studio mit 100% autonomer KI-Physik, echtem NVIDIA Tensor-Core Raytracing (RTGI, SSR, RTAO), Neural AI Super-Resolution (bis 8K), automatischer GPU-Erkennung und permanenter Windows-Installation über eine einzige `.exe`.**
 > 
-> 📥 **[Hier klicken: Neueste Version `Luxanix-Setup.exe (v1.1.0)` herunterladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
+> 📥 **[Hier klicken: Neueste Version `Luxanix-Setup.exe (v2.0.0)` herunterladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
+> *(Einzige benötigte Datei! Installiert alles vollautomatisch und richtet Desktop- & Startmenü-Verknüpfungen ein).*
 
 ---
 

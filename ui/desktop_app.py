@@ -36,7 +36,7 @@ class LuxanixDesktopApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("⚡ Luxanix Studio Pro — Autonomous AI Video Editor (NVIDIA RTX 50 Ready)")
+        self.title("⚡ Luxanix Studio Pro v2.0.0 — CapCut NLE AI Video Editor (NVIDIA RTX 50 Ready)")
         self.geometry("1520x960")
         self.minsize(1240, 800)
         self.configure(fg_color="#0b0e13")
@@ -149,7 +149,7 @@ class LuxanixDesktopApp(ctk.CTk):
 
         badge = ctk.CTkLabel(
             left_box,
-            text="PRO EDITOR",
+            text="CAPCUT PRO v2.0.0",
             font=ctk.CTkFont(size=10, weight="bold"),
             fg_color="#00c4cc",
             text_color="#000000",
@@ -275,6 +275,8 @@ class LuxanixDesktopApp(ctk.CTk):
         tab_media = self.left_tabview.add("📁 Medien")
         tab_ai = self.left_tabview.add("⚡ Autonome KI")
         tab_upscale = self.left_tabview.add("🔬 AI-Upscaler")
+        tab_color = self.left_tabview.add("🎨 Farbe")
+        tab_audio = self.left_tabview.add("🎵 Audio")
 
         # --- TAB: MEDIEN ---
         box_import = ctk.CTkFrame(tab_media, fg_color="#151b22", corner_radius=6, border_width=1, border_color="#26313f")
@@ -414,6 +416,41 @@ class LuxanixDesktopApp(ctk.CTk):
         )
         self.sw_neural.select()
         self.sw_neural.pack(anchor="w", padx=6, pady=8)
+
+        # --- TAB: FARBE & COLOR GRADING (CapCut) ---
+        scroll_col = ctk.CTkScrollableFrame(tab_color, fg_color="transparent")
+        scroll_col.pack(fill="both", expand=True, padx=2, pady=2)
+
+        ctk.CTkLabel(scroll_col, text="🎨 Farbkorrektur & Grading", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=4, pady=(4, 6))
+
+        ctk.CTkLabel(scroll_col, text="Sättigung", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
+        self.slider_sat = ctk.CTkSlider(scroll_col, from_=0.5, to=1.6, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        self.slider_sat.set(1.0)
+        self.slider_sat.pack(fill="x", padx=4, pady=(1, 6))
+
+        ctk.CTkLabel(scroll_col, text="Farbtemperatur", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
+        self.slider_temp = ctk.CTkSlider(scroll_col, from_=-0.5, to=0.5, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        self.slider_temp.set(0.0)
+        self.slider_temp.pack(fill="x", padx=4, pady=(1, 6))
+
+        ctk.CTkLabel(scroll_col, text="Filmkorn (Kino-Look)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
+        self.slider_grain = ctk.CTkSlider(scroll_col, from_=0.0, to=0.2, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        self.slider_grain.set(0.05)
+        self.slider_grain.pack(fill="x", padx=4, pady=(1, 6))
+
+        # --- TAB: AUDIO SPUR (CapCut) ---
+        scroll_aud = ctk.CTkScrollableFrame(tab_audio, fg_color="transparent")
+        scroll_aud.pack(fill="both", expand=True, padx=2, pady=2)
+
+        ctk.CTkLabel(scroll_aud, text="🎵 Audio-Spur & Pegel", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=4, pady=(4, 6))
+
+        ctk.CTkLabel(scroll_aud, text="Master-Lautstärke (0% - 200%)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
+        self.slider_vol = ctk.CTkSlider(scroll_aud, from_=0.0, to=2.0, button_color="#00c4cc", progress_color="#00c4cc")
+        self.slider_vol.set(1.0)
+        self.slider_vol.pack(fill="x", padx=4, pady=(1, 6))
+
+        self.sw_mute = ctk.CTkSwitch(scroll_aud, text="Audio stummschalten (Mute)", font=ctk.CTkFont(size=10, weight="bold"), progress_color="#f87171")
+        self.sw_mute.pack(anchor="w", padx=6, pady=8)
 
     # 2B. CENTER PLAYER: CONTINUOUS FULL-VIDEO STREAMING
     def _build_center_player(self):
@@ -1068,6 +1105,10 @@ class LuxanixDesktopApp(ctk.CTk):
 
     def _on_intensity_change(self, val):
         self.realism_intensity = float(val)
+        if not self.is_playing:
+            self._render_single_frame_at(self.current_time_sec)
+
+    def _on_color_change(self):
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
 
