@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Output videos & temp frames
+*.mp4
+*.mkv
+*.avi
+*.aac
+_temp_*
+test_output/
+renders/
+
+# Model cache & checkpoints
+*.pt
+*.pth
+*.onnx
+*.bin
+huggingface/
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db

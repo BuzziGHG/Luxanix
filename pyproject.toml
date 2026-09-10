@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simrtx-studio"
+version = "1.0.0"
+description = "AI-powered Screen-Space Ray Tracing & Photorealistic Remaster Studio for Simracing & Gaming Videos"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "SimRTX Team" }
+]
+keywords = [
+    "raytracing",
+    "rtx",
+    "simracing",
+    "assetto-corsa",
+    "depth-anything",
+    "global-illumination",
+    "ssr",
+    "rtao",
+    "video-processing",
+    "nvenc"
+]
+dependencies = [
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+    "gradio>=4.20.0",
+    "transformers>=4.38.0",
+    "accelerate>=0.27.0",
+    "timm>=0.9.12",
+    "imageio>=2.33.0",
+    "imageio-ffmpeg>=0.4.9",
+    "tqdm>=4.66.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/simrtx-studio"
+Repository = "https://github.com/your-username/simrtx-studio.git"
