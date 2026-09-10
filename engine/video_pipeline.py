@@ -213,6 +213,9 @@ class VideoPipeline:
         When params['fast_preview'] is True (live playback), skips depth estimation and
         raytracing to achieve near real-time 25-30 fps preview — only applies color grading.
         """
+        # Create a shallow copy of params so mutations do not leak or compound across video frames
+        params = dict(params)
+
         orig_h, orig_w = frame_rgb.shape[:2]
         max_internal_res = params.get("max_internal_res", None)
 
@@ -228,9 +231,21 @@ class VideoPipeline:
 
         # Autonomous AI Realism Engine (Real-time physical calculation without presets)
         if params.get("auto_realism", True) or params.get("auto_preset", False):
-            auto_vals = self.auto_realism.analyze_and_compute(frame_proc, master_intensity=params.get("realism_intensity", 1.0))
-            for k, v in auto_vals.items():
-                params[k] = v
+            m_int = params.get("realism_intensity", 1.0)
+            auto_vals = self.auto_realism.analyze_and_compute(frame_proc, master_intensity=m_int)
+            params.update(auto_vals)
+
+            # Apply manual grading overrides from user sliders if provided
+            if "manual_sat" in params:
+                params["saturation"] = params.get("saturation", 1.0) * float(params["manual_sat"])
+            if "manual_temp" in params:
+                params["temperature"] = params.get("temperature", 0.0) + float(params["manual_temp"])
+            if "manual_contrast" in params:
+                params["contrast"] = params.get("contrast", 1.0) * float(params["manual_contrast"])
+            if "manual_exp" in params:
+                params["exposure"] = params.get("exposure", 0.0) + float(params["manual_exp"])
+            if "manual_grain" in params:
+                params["film_grain"] = float(params["manual_grain"])
 
         # ---------------------------------------------------------------
         # FAST PREVIEW PATH — GPU-accelerated real-time RTX preview

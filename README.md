@@ -6,10 +6,25 @@
 [![PyTorch CUDA](https://img.shields.io/badge/PyTorch-CUDA%2012.4-EE4C2C.svg?logo=pytorch)](https://pytorch.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Professionelles CapCut-inspiriertes Videoschnitt- & Remastering-Studio mit 100% autonomer KI-Physik, echtem NVIDIA Tensor-Core Raytracing (RTGI, SSR, RTAO), Neural AI Super-Resolution (bis 8K), automatischer GPU-Erkennung und permanenter Windows-Installation über eine einzige `.exe`.**
+> **Professionelles CapCut-inspiriertes Videoschnitt- & Remastering-Studio mit 100% autonomer KI-Physik, echtem NVIDIA Tensor-Core Raytracing (RTGI, SSR, RTAO), GPU VRAM Frame-Cache (60 FPS Echtzeit-Playback), Neural AI Super-Resolution (bis 8K), automatischer GPU-Erkennung und permanenter Windows-Installation über eine einzige `.exe`.**
 > 
 > 📥 **[Hier klicken: Neueste Version `Luxanix-Setup.exe (v2.1.0)` herunterladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
 > *(Einzige benötigte Datei! Installiert alles vollautomatisch und richtet Desktop- & Startmenü-Verknüpfungen ein).*
+
+---
+
+## ⚡ Neu in v2.1.0: GPU VRAM Cache & Perfektionierter Photorealismus
+
+- ⚡ **GPU VRAM Frame-Cache (Echtzeit-Streaming):**
+  Nutzt den High-Speed GDDR6X-Grafikspeicher moderner Grafikkarten (z.B. 12 GB auf RTX 3080 Ti) voll aus. Bereits berechnete Frames werden als FP16 PyTorch CUDA Tensoren direkt im VRAM gepuffert, sodass die Videovorschau mit flüssigen 60 FPS latenzfrei aus dem GPU-Speicher gestreamt wird.
+- 🎚️ **Linearer Photorealismus-Stärke Regler (0.0 bis 2.0):**
+  - **Ganz links (0.0):** 100% unberührtes Originalbild (0% AI / 0% Shader / 100% Rohmaterial).
+  - **Mitte (1.0):** Ausgewogener, kinoreifer Photorealismus (+24% Livery-Sättigung, Rec.709 Kontrast, SSR Fahrbahn-Nässe, RTAO Kontaktschatten).
+  - **Ganz rechts (2.0):** Maximales Remaster mit Hyper-Reflexionen und tiefen Kontaktschatten.
+- 🎨 **Farbkorrektur & Grading in Echtzeit:**
+  Automatische KI-Farbkorrektur kombiniert mit manuellen Reglern für Sättigung (0.0× Schwarz-Weiß bis 2.5× Hyper-Saturiert), Kontrast, Farbtemperatur (Kelvin) und Belichtung (EV) mit sofortiger Bildaktualisierung.
+- 🎬 **Sauberer Single-File Export:**
+  Keine temporären Dateileichen mehr im Ausgabeordner. Alle Renderstufen laufen isoliert über den Windows-Temp-Speicher, sodass exakt eine fertige `.mp4`-Datei ausgegeben wird.
 
 ---
 

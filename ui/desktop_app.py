@@ -27,6 +27,7 @@ from engine.video_pipeline import VideoPipeline, get_video_info
 from engine.hardware import detect_gpu_hardware, get_profile_settings
 from engine.auto_realism import AutonomousRealismEngine
 from engine.upscaler import NeuralUpscaler
+from engine.vram_cache import GPUFrameCache
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("green")
@@ -48,12 +49,14 @@ class LuxanixDesktopApp(ctk.CTk):
             except Exception:
                 pass
 
-        # Core Engines
+        # Core Engines & GPU VRAM Cache
         self.pipeline = None
         self.auto_realism = AutonomousRealismEngine()
         self.neural_upscaler = None
         self.gpu_info = detect_gpu_hardware()
         self.current_profile_key = getattr(self.gpu_info, "recommended_profile", "ultra")
+        gpu_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.vram_cache = GPUFrameCache(device=gpu_device, max_cache_frames=240, max_vram_gb=4.5)
 
         # Video, Photo & Timeline State
         self.video_path = None
@@ -392,18 +395,40 @@ class LuxanixDesktopApp(ctk.CTk):
             wraplength=270
         ).pack(anchor="w", padx=10, pady=(0, 8))
 
-        # Master Realism Intensity
-        ctk.CTkLabel(scroll_ai, text="Photorealismus-Stärke", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(6, 2))
+        # Master Realism Intensity (0.0: Raw Original — 1.0: Balanced — 2.0: Maximal)
+        row_int = ctk.CTkFrame(scroll_ai, fg_color="transparent")
+        row_int.pack(fill="x", padx=4, pady=(6, 2))
+        ctk.CTkLabel(row_int, text="Photorealismus-Stärke", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_intensity_val = ctk.CTkLabel(row_int, text="100% (Ausgewogener Photorealismus)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#00e5ff")
+        self.lbl_intensity_val.pack(side="right")
+
         self.slider_intensity = ctk.CTkSlider(
             scroll_ai,
-            from_=0.2,
-            to=1.8,
+            from_=0.0,
+            to=2.0,
             button_color="#00c4cc",
             progress_color="#00c4cc",
             command=self._on_intensity_change
         )
         self.slider_intensity.set(1.0)
-        self.slider_intensity.pack(fill="x", padx=4, pady=(2, 8))
+        self.slider_intensity.pack(fill="x", padx=4, pady=(2, 4))
+
+        ctk.CTkLabel(
+            scroll_ai,
+            text="◀ Links (0.0): Originalzustand   |   Mitte (1.0): Ausgewogen   |   Rechts (2.0): Maximal ▶",
+            font=ctk.CTkFont(size=9),
+            text_color="#64748b"
+        ).pack(anchor="w", padx=4, pady=(0, 6))
+
+        # GPU VRAM Frame Cache Card
+        card_vram = ctk.CTkFrame(scroll_ai, fg_color="#0d1520", corner_radius=6, border_width=1, border_color="#0284c7")
+        card_vram.pack(fill="x", padx=2, pady=4)
+
+        ctk.CTkLabel(card_vram, text="⚡ GPU VRAM Frame-Cache (Echtzeit-Streaming):", font=ctk.CTkFont(size=10, weight="bold"), text_color="#38bdf8").pack(anchor="w", padx=8, pady=(6, 2))
+        self.lbl_vram_status = ctk.CTkLabel(card_vram, text="• VRAM Speicher: Bereit (NVIDIA GPU)", font=ctk.CTkFont(size=10), text_color="#94a3b8", anchor="w")
+        self.lbl_vram_status.pack(fill="x", padx=8)
+        self.lbl_vram_frames = ctk.CTkLabel(card_vram, text="• Gecachte Frames: 0 (60 FPS VRAM-Playback)", font=ctk.CTkFont(size=10), text_color="#94a3b8", anchor="w")
+        self.lbl_vram_frames.pack(fill="x", padx=8, pady=(0, 6))
 
         # Live Real-Time Telemetry Dashboard
         card_telemetry = ctk.CTkFrame(scroll_ai, fg_color="#151b22", corner_radius=6)
@@ -477,19 +502,50 @@ class LuxanixDesktopApp(ctk.CTk):
 
         ctk.CTkLabel(scroll_col, text="🎨 Farbkorrektur & Grading", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=4, pady=(4, 6))
 
-        ctk.CTkLabel(scroll_col, text="Sättigung", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
-        self.slider_sat = ctk.CTkSlider(scroll_col, from_=0.5, to=1.6, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        # Sättigung (0.0 = Schwarz-Weiß, 1.0 = Normal/Auto, 2.5 = Hyper-Saturiert)
+        row_sat = ctk.CTkFrame(scroll_col, fg_color="transparent")
+        row_sat.pack(fill="x", padx=4, pady=(3, 1))
+        ctk.CTkLabel(row_sat, text="Sättigung", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_sat_val = ctk.CTkLabel(row_sat, text="1.00×", font=ctk.CTkFont(size=10), text_color="#00c4cc")
+        self.lbl_sat_val.pack(side="right")
+        self.slider_sat = ctk.CTkSlider(scroll_col, from_=0.0, to=2.5, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
         self.slider_sat.set(1.0)
-        self.slider_sat.pack(fill="x", padx=4, pady=(1, 6))
+        self.slider_sat.pack(fill="x", padx=4, pady=(1, 5))
 
-        ctk.CTkLabel(scroll_col, text="Farbtemperatur", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
-        self.slider_temp = ctk.CTkSlider(scroll_col, from_=-0.5, to=0.5, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        # Kontrast (0.5 = flach, 1.0 = Standard, 1.8 = stark)
+        row_con = ctk.CTkFrame(scroll_col, fg_color="transparent")
+        row_con.pack(fill="x", padx=4, pady=(3, 1))
+        ctk.CTkLabel(row_con, text="Kontrast", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_con_val = ctk.CTkLabel(row_con, text="1.00×", font=ctk.CTkFont(size=10), text_color="#00c4cc")
+        self.lbl_con_val.pack(side="right")
+        self.slider_contrast = ctk.CTkSlider(scroll_col, from_=0.5, to=1.8, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        self.slider_contrast.set(1.0)
+        self.slider_contrast.pack(fill="x", padx=4, pady=(1, 5))
+
+        # Farbtemperatur (-1.0 cool/blau … +1.0 warm/orange)
+        row_tmp = ctk.CTkFrame(scroll_col, fg_color="transparent")
+        row_tmp.pack(fill="x", padx=4, pady=(3, 1))
+        ctk.CTkLabel(row_tmp, text="Farbtemperatur (Kelvin)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_tmp_val = ctk.CTkLabel(row_tmp, text="0.00", font=ctk.CTkFont(size=10), text_color="#00c4cc")
+        self.lbl_tmp_val.pack(side="right")
+        self.slider_temp = ctk.CTkSlider(scroll_col, from_=-1.0, to=1.0, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
         self.slider_temp.set(0.0)
-        self.slider_temp.pack(fill="x", padx=4, pady=(1, 6))
+        self.slider_temp.pack(fill="x", padx=4, pady=(1, 5))
 
-        ctk.CTkLabel(scroll_col, text="Filmkorn (Kino-Look)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(4, 1))
+        # Manuelle Belichtung EV (-2.0 EV bis +2.0 EV)
+        row_exp = ctk.CTkFrame(scroll_col, fg_color="transparent")
+        row_exp.pack(fill="x", padx=4, pady=(3, 1))
+        ctk.CTkLabel(row_exp, text="Manuelle Belichtung (EV)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(side="left")
+        self.lbl_exp_val = ctk.CTkLabel(row_exp, text="0.00 EV", font=ctk.CTkFont(size=10), text_color="#00c4cc")
+        self.lbl_exp_val.pack(side="right")
+        self.slider_exp = ctk.CTkSlider(scroll_col, from_=-2.0, to=2.0, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
+        self.slider_exp.set(0.0)
+        self.slider_exp.pack(fill="x", padx=4, pady=(1, 5))
+
+        # Filmkorn
+        ctk.CTkLabel(scroll_col, text="Filmkorn (Kino-Look)", font=ctk.CTkFont(size=10, weight="bold"), text_color="#cbd5e1").pack(anchor="w", padx=4, pady=(3, 1))
         self.slider_grain = ctk.CTkSlider(scroll_col, from_=0.0, to=0.2, button_color="#00c4cc", progress_color="#00c4cc", command=lambda v: self._on_color_change())
-        self.slider_grain.set(0.05)
+        self.slider_grain.set(0.0)
         self.slider_grain.pack(fill="x", padx=4, pady=(1, 6))
 
         ctk.CTkButton(
@@ -1166,14 +1222,29 @@ class LuxanixDesktopApp(ctk.CTk):
     def _reset_ai_settings(self):
         self.slider_intensity.set(1.0)
         self.realism_intensity = 1.0
-        self.lbl_status.configure(text="↩️ KI-Photorealismus auf Standardwerte zurückgesetzt.")
+        self.auto_realism.reset()
+        if hasattr(self, "vram_cache"):
+            self.vram_cache.clear()
+        if hasattr(self, "lbl_intensity_val"):
+            self.lbl_intensity_val.configure(text="100% (Ausgewogener Photorealismus)")
+        self.lbl_status.configure(text="↩️ KI-Photorealismus auf 100% (Ausgewogen) zurückgesetzt.")
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
 
     def _reset_color_settings(self):
-        self.slider_sat.set(1.0)
-        self.slider_temp.set(0.0)
-        self.slider_grain.set(0.05)
+        if hasattr(self, "slider_sat"): self.slider_sat.set(1.0)
+        if hasattr(self, "slider_contrast"): self.slider_contrast.set(1.0)
+        if hasattr(self, "slider_temp"): self.slider_temp.set(0.0)
+        if hasattr(self, "slider_exp"): self.slider_exp.set(0.0)
+        if hasattr(self, "slider_grain"): self.slider_grain.set(0.0)
+
+        if hasattr(self, "lbl_sat_val"): self.lbl_sat_val.configure(text="1.00×")
+        if hasattr(self, "lbl_con_val"): self.lbl_con_val.configure(text="1.00×")
+        if hasattr(self, "lbl_tmp_val"): self.lbl_tmp_val.configure(text="0.00")
+        if hasattr(self, "lbl_exp_val"): self.lbl_exp_val.configure(text="0.00 EV")
+
+        if hasattr(self, "vram_cache"):
+            self.vram_cache.clear()
         self.lbl_status.configure(text="↩️ Farbkorrektur auf Standardwerte zurückgesetzt.")
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
@@ -1373,27 +1444,35 @@ class LuxanixDesktopApp(ctk.CTk):
             pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
             small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
 
-            # 1. Autonomous Realism Computation (No Presets!)
-            auto_params = self.auto_realism.analyze_and_compute(small_rgb, master_intensity=self.realism_intensity)
-            # Fast preview mode: skip depth estimation + raytracing for real-time playback
-            auto_params["fast_preview"] = True
-
-            # 2. Render enhanced frame (fast color-grading path during live playback)
-            if self.pipeline is not None:
-                out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
-            else:
+            # Master Slider 0.0 = Raw Original
+            if self.realism_intensity <= 0.04:
                 out_rgb = small_rgb
+                auto_params = {"exposure": 0.0, "contrast": 1.0, "temperature": 0.0, "saturation": 1.0, "scene_type": "original (100%)", "ssr_intensity": 0.0, "rtao_intensity": 0.0, "rtgi_intensity": 0.0}
+            else:
+                # Check GPU VRAM Cache for instantaneous 60 FPS live playback
+                cur_f_idx = int(self.current_time_sec * fps)
+                cached = self.vram_cache.get(cur_f_idx) if hasattr(self, "vram_cache") else None
+                if cached is not None:
+                    out_rgb, auto_params = cached
+                else:
+                    auto_params = self._get_active_params(small_rgb, master_intensity=self.realism_intensity, smooth=True)
+                    auto_params["fast_preview"] = True
+                    if self.pipeline is not None:
+                        out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
+                    else:
+                        out_rgb = small_rgb
+                    if hasattr(self, "vram_cache"):
+                        self.vram_cache.put(cur_f_idx, out_rgb, auto_params)
 
             # 3. Apply Split Mode
             if self.split_view_mode == "Original":
                 disp = small_rgb
             elif self.split_view_mode == "Depth":
-                # In fast preview mode no depth map — show Original vs Enhanced A/B split instead
                 h, w = out_rgb.shape[:2]
                 mid = w // 2
                 disp = np.copy(out_rgb)
                 disp[:, :mid] = small_rgb[:, :mid]
-                disp[:, mid-2:mid+2] = [255, 255, 0]  # Yellow divider = fast preview A/B
+                disp[:, mid-2:mid+2] = [255, 255, 0]
             elif self.split_view_mode == "Split":
                 h, w = out_rgb.shape[:2]
                 mid = w // 2
@@ -1402,7 +1481,6 @@ class LuxanixDesktopApp(ctk.CTk):
                 disp[:, mid-2:mid+2] = [255, 255, 255]
             else:
                 disp = out_rgb
-
 
             # Advance playhead
             self.current_time_sec += (1.0 / fps) * self.playback_speed
@@ -1424,6 +1502,29 @@ class LuxanixDesktopApp(ctk.CTk):
 
         cap.release()
 
+    def _get_active_params(self, frame_rgb, master_intensity=None, smooth=True):
+        """Computes autonomous physical parameters and merges manual user grading adjustments."""
+        m_int = self.realism_intensity if master_intensity is None else master_intensity
+        params = self.auto_realism.analyze_and_compute(frame_rgb, master_intensity=m_int, smooth=smooth)
+
+        # Apply manual user color grading adjustments from the "Farbe" tab
+        if hasattr(self, "slider_sat"):
+            manual_sat = float(self.slider_sat.get())
+            params["saturation"] = params.get("saturation", 1.0) * manual_sat
+        if hasattr(self, "slider_contrast"):
+            manual_contrast = float(self.slider_contrast.get())
+            params["contrast"] = params.get("contrast", 1.0) * manual_contrast
+        if hasattr(self, "slider_temp"):
+            manual_temp = float(self.slider_temp.get())
+            params["temperature"] = params.get("temperature", 0.0) + manual_temp
+        if hasattr(self, "slider_exp"):
+            manual_exp = float(self.slider_exp.get())
+            params["exposure"] = params.get("exposure", 0.0) + manual_exp
+        if hasattr(self, "slider_grain"):
+            params["film_grain"] = float(self.slider_grain.get())
+
+        return params
+
     def _update_playback_ui(self, disp_img, curr_sec, auto_params):
         self._display_image_on_screen(disp_img)
         self._draw_timeline()
@@ -1437,40 +1538,52 @@ class LuxanixDesktopApp(ctk.CTk):
         dur_f = int((self.total_duration_sec - int(self.total_duration_sec)) * 30)
         self.lbl_timecode.configure(text=f"{m:02d}:{s:02d}:{f:02d} / {dur_m:02d}:{dur_s:02d}:{dur_f:02d}")
 
-        # Update Live Telemetry — now includes full auto color science
+        # Update Live Telemetry
         scene = auto_params.get("scene_type", "daylight")
         scene_icons = {
             "night": "🌑", "low_light": "🌒", "golden_hour": "🌅",
-            "overcast": "☁️", "daylight": "☀️", "bright_day": "🌞", "indoor": "💡"
+            "overcast": "☁️", "daylight": "☀️", "bright_day": "🌞", "indoor": "💡", "original (100%)": "📷"
         }
         scene_icon = scene_icons.get(scene, "🎬")
 
         ev   = auto_params.get("exposure", 0.0)
-        cont = auto_params.get("contrast", 1.15)
+        cont = auto_params.get("contrast", 1.0)
         temp = auto_params.get("temperature", 0.0)
         sat  = auto_params.get("saturation", 1.0)
         vib  = auto_params.get("vibrance", 0.0)
-        ssr  = auto_params.get("ssr_intensity", 0.5)
-        rtgi = auto_params.get("rtgi_intensity", 0.5)
-        rtao = auto_params.get("rtao_intensity", 0.6)
-        slift = auto_params.get("shadow_lift", 0.0)
-        hroll = auto_params.get("highlight_rolloff", 0.0)
-        vig  = auto_params.get("vignette", 0.0)
+        ssr  = auto_params.get("ssr_intensity", 0.0)
+        rtgi = auto_params.get("rtgi_intensity", 0.0)
+        rtao = auto_params.get("rtao_intensity", 0.0)
 
         temp_dir = "→ warm" if temp > 0.02 else ("→ cool" if temp < -0.02 else "→ neutral")
 
         self.lbl_telem_exp.configure(
-            text=f"• {scene_icon} Szene: {scene}  |  Belichtung: {ev:+.2f} EV  |  Kontrast: {cont:.2f}"
+            text=f"• {scene_icon} Szene: {scene}  |  Belichtung: {ev:+.2f} EV  |  Kontrast: {cont:.2f}×"
         )
         self.lbl_telem_wet.configure(
             text=f"• 🎨 WB: {temp:+.2f} ({temp_dir})  |  Sättigung: {sat:.2f}×  |  Vibrance: +{vib:.2f}"
         )
         self.lbl_telem_rtgi.configure(
-            text=f"• 🌑 Shadow Lift: {slift:.3f}  |  Highlight Rolloff: {hroll:.2f}  |  Vignette: {vig:.2f}"
+            text=f"• ⚡ RTX — SSR Reflexionen: {ssr:.2f}  |  RTGI Streulicht: {rtgi:.2f}"
         )
         self.lbl_telem_rtao.configure(
-            text=f"• ⚡ RTX — SSR: {ssr:.2f}  RTGI: {rtgi:.2f}  RTAO: {rtao:.2f}"
+            text=f"• 🌑 RTAO Kontaktschatten: {rtao:.2f}  |  Stärke: {self.realism_intensity*100:.0f}%"
         )
+
+        # Update GPU VRAM Frame Cache Telemetry
+        if hasattr(self, "vram_cache") and hasattr(self, "lbl_vram_status"):
+            v_stats = self.vram_cache.get_vram_stats()
+            self.lbl_vram_status.configure(
+                text=f"• VRAM Speicher: {v_stats['allocated_mb']:.0f} MB / {v_stats['total_gb']:.1f} GB (GPU-Cache: {v_stats['hit_rate_pct']:.0f}% Hit-Rate)"
+            )
+            self.lbl_vram_frames.configure(
+                text=f"• Gecachte Frames: {v_stats['cached_frames']} Frames im VRAM (60 FPS Wiedergabe)"
+            )
+            if hasattr(self, "lbl_header_gpu"):
+                gpu_name = getattr(self.gpu_info, "device_name", "NVIDIA RTX")
+                self.lbl_header_gpu.configure(
+                    text=f"🟢 {gpu_name} | VRAM: {v_stats['allocated_mb']:.0f} MB / {v_stats['total_gb']:.1f} GB ({v_stats['cached_frames']} Frm)"
+                )
 
     def _seek_to_time(self, target_sec):
         self.current_time_sec = target_sec
@@ -1500,18 +1613,23 @@ class LuxanixDesktopApp(ctk.CTk):
             pw = int(frame_rgb.shape[1] * (ph / frame_rgb.shape[0]))
             small_rgb = cv2.resize(frame_rgb, (pw, ph), interpolation=cv2.INTER_AREA)
 
-            auto_params = self.auto_realism.analyze_and_compute(small_rgb, master_intensity=self.realism_intensity, smooth=False)
-            if self.pipeline is not None:
-                out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
-            else:
+            # Master Slider 0.0 = Raw Original
+            if self.realism_intensity <= 0.04:
                 out_rgb = small_rgb
+                auto_params = {"exposure": 0.0, "contrast": 1.0, "temperature": 0.0, "saturation": 1.0, "scene_type": "original (100%)", "ssr_intensity": 0.0, "rtao_intensity": 0.0, "rtgi_intensity": 0.0}
+            else:
+                auto_params = self._get_active_params(small_rgb, master_intensity=self.realism_intensity, smooth=False)
+                if self.pipeline is not None:
+                    out_rgb, depth, normals = self.pipeline.process_single_frame(small_rgb, auto_params)
+                else:
+                    out_rgb = small_rgb
 
             if self.split_view_mode == "Original": disp = small_rgb
             elif self.split_view_mode == "Depth":
-                h, w = depth.shape[:2]
+                h, w = out_rgb.shape[:2]
                 comb = np.zeros((h, w * 2, 3), dtype=np.uint8)
-                comb[:, :w] = depth
-                comb[:, w:] = normals
+                comb[:, :w] = small_rgb
+                comb[:, w:] = out_rgb
                 disp = comb
             elif self.split_view_mode == "Split":
                 h, w = out_rgb.shape[:2]
@@ -1560,10 +1678,40 @@ class LuxanixDesktopApp(ctk.CTk):
     def _on_intensity_change(self, val):
         self.realism_intensity = float(val)
         self.auto_realism.reset()
+        if hasattr(self, "vram_cache"):
+            self.vram_cache.clear()
+
+        # Update dynamic percentage label
+        if hasattr(self, "lbl_intensity_val"):
+            pct = int(self.realism_intensity * 100)
+            if self.realism_intensity <= 0.04:
+                txt = "0% (Originalzustand — 100% Rohbild)"
+            elif self.realism_intensity < 0.90:
+                txt = f"{pct}% (Subtiler Photorealismus)"
+            elif self.realism_intensity <= 1.10:
+                txt = f"{pct}% (Ausgewogener Photorealismus)"
+            else:
+                txt = f"{pct}% (Maximales Remaster — Hyper-Reflexionen & Kontrast)"
+            self.lbl_intensity_val.configure(text=txt)
+
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
 
     def _on_color_change(self):
+        # Update labels next to sliders
+        if hasattr(self, "lbl_sat_val") and hasattr(self, "slider_sat"):
+            self.lbl_sat_val.configure(text=f"{float(self.slider_sat.get()):.2f}×")
+        if hasattr(self, "lbl_con_val") and hasattr(self, "slider_contrast"):
+            self.lbl_con_val.configure(text=f"{float(self.slider_contrast.get()):.2f}×")
+        if hasattr(self, "lbl_tmp_val") and hasattr(self, "slider_temp"):
+            t = float(self.slider_temp.get())
+            self.lbl_tmp_val.configure(text=f"{t:+.2f}")
+        if hasattr(self, "lbl_exp_val") and hasattr(self, "slider_exp"):
+            e = float(self.slider_exp.get())
+            self.lbl_exp_val.configure(text=f"{e:+.2f} EV")
+
+        if hasattr(self, "vram_cache"):
+            self.vram_cache.clear()
         if not self.is_playing:
             self._render_single_frame_at(self.current_time_sec)
 
@@ -1701,6 +1849,11 @@ class LuxanixDesktopApp(ctk.CTk):
             img_params = {
                 "auto_realism": True,
                 "realism_intensity": self.realism_intensity,
+                "manual_sat": float(self.slider_sat.get()) if hasattr(self, "slider_sat") else 1.0,
+                "manual_contrast": float(self.slider_contrast.get()) if hasattr(self, "slider_contrast") else 1.0,
+                "manual_temp": float(self.slider_temp.get()) if hasattr(self, "slider_temp") else 0.0,
+                "manual_exp": float(self.slider_exp.get()) if hasattr(self, "slider_exp") else 0.0,
+                "manual_grain": float(self.slider_grain.get()) if hasattr(self, "slider_grain") else 0.0,
                 "neural_upscale": bool(self.sw_neural.get()),
                 "output_resolution": out_res,
                 "denoise": True,
@@ -1760,6 +1913,11 @@ class LuxanixDesktopApp(ctk.CTk):
         params = {
             "auto_realism": True,
             "realism_intensity": self.realism_intensity,
+            "manual_sat": float(self.slider_sat.get()) if hasattr(self, "slider_sat") else 1.0,
+            "manual_contrast": float(self.slider_contrast.get()) if hasattr(self, "slider_contrast") else 1.0,
+            "manual_temp": float(self.slider_temp.get()) if hasattr(self, "slider_temp") else 0.0,
+            "manual_exp": float(self.slider_exp.get()) if hasattr(self, "slider_exp") else 0.0,
+            "manual_grain": float(self.slider_grain.get()) if hasattr(self, "slider_grain") else 0.0,
             "neural_upscale": bool(self.sw_neural.get()),
             "output_resolution": out_res,
             "encoder_codec": codec,
