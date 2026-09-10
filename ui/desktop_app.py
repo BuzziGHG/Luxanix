@@ -111,8 +111,15 @@ class LuxanixDesktopApp(ctk.CTk):
         self.bind("<space>", lambda e: self._toggle_playback())
         self.bind("<Control-b>", lambda e: self._split_clip_at_playhead())
         self.bind("<Delete>", lambda e: self._delete_selected_segment())
+        self.bind("<BackSpace>", lambda e: self._delete_selected_segment())
         self.bind("<Left>", lambda e: self._step_time(-0.5))
         self.bind("<Right>", lambda e: self._step_time(+0.5))
+        self.bind("<Up>", lambda e: self._select_prev_segment())
+        self.bind("<Down>", lambda e: self._select_next_segment())
+        self.bind("<Home>", lambda e: self._rewind_to_start())
+        self.bind("<End>", lambda e: self._seek_to_end())
+        self.bind("<i>", lambda e: self._trim_start_at_playhead())
+        self.bind("<o>", lambda e: self._trim_end_at_playhead())
 
     # =========================================================================
     # CAPCUT NLE INTERFACE BUILDER
@@ -182,7 +189,20 @@ class LuxanixDesktopApp(ctk.CTk):
             padx=8,
             pady=2
         )
-        self.lbl_autosave.pack(side="left", padx=12)
+        self.lbl_autosave.pack(side="left", padx=8)
+
+        btn_master_reset = ctk.CTkButton(
+            left_box,
+            text="↩️ Alles Reset",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="#1e242d",
+            hover_color="#374151",
+            text_color="#cbd5e1",
+            width=75,
+            height=24,
+            command=self._reset_all
+        )
+        btn_master_reset.pack(side="left", padx=4)
 
         # Center: Project Title & Shortcuts Hint
         center_box = ctk.CTkFrame(self.header, fg_color="transparent")
@@ -378,6 +398,16 @@ class LuxanixDesktopApp(ctk.CTk):
         self.lbl_telem_rtao = ctk.CTkLabel(card_telemetry, text="• RTAO Kontaktschatten: Berechne...", font=ctk.CTkFont(size=10), text_color="#94a3b8", anchor="w")
         self.lbl_telem_rtao.pack(fill="x", padx=8, pady=(0, 6))
 
+        ctk.CTkButton(
+            scroll_ai,
+            text="↩️ KI-Werte zurücksetzen",
+            font=ctk.CTkFont(size=10),
+            fg_color="#1e242d",
+            hover_color="#2b3442",
+            height=26,
+            command=self._reset_ai_settings
+        ).pack(fill="x", padx=4, pady=6)
+
         # --- TAB: NEURAL AI-UPSCALER ---
         scroll_up = ctk.CTkScrollableFrame(tab_upscale, fg_color="transparent")
         scroll_up.pack(fill="both", expand=True, padx=2, pady=2)
@@ -438,6 +468,16 @@ class LuxanixDesktopApp(ctk.CTk):
         self.slider_grain.set(0.05)
         self.slider_grain.pack(fill="x", padx=4, pady=(1, 6))
 
+        ctk.CTkButton(
+            scroll_col,
+            text="↩️ Farbkorrektur zurücksetzen",
+            font=ctk.CTkFont(size=10),
+            fg_color="#1e242d",
+            hover_color="#2b3442",
+            height=26,
+            command=self._reset_color_settings
+        ).pack(fill="x", padx=4, pady=6)
+
         # --- TAB: AUDIO SPUR (CapCut) ---
         scroll_aud = ctk.CTkScrollableFrame(tab_audio, fg_color="transparent")
         scroll_aud.pack(fill="both", expand=True, padx=2, pady=2)
@@ -451,6 +491,16 @@ class LuxanixDesktopApp(ctk.CTk):
 
         self.sw_mute = ctk.CTkSwitch(scroll_aud, text="Audio stummschalten (Mute)", font=ctk.CTkFont(size=10, weight="bold"), progress_color="#f87171")
         self.sw_mute.pack(anchor="w", padx=6, pady=8)
+
+        ctk.CTkButton(
+            scroll_aud,
+            text="↩️ Audio zurücksetzen",
+            font=ctk.CTkFont(size=10),
+            fg_color="#1e242d",
+            hover_color="#2b3442",
+            height=26,
+            command=self._reset_audio_settings
+        ).pack(fill="x", padx=4, pady=6)
 
     # 2B. CENTER PLAYER: CONTINUOUS FULL-VIDEO STREAMING
     def _build_center_player(self):
@@ -559,7 +609,7 @@ class LuxanixDesktopApp(ctk.CTk):
         scroll = ctk.CTkScrollableFrame(panel, fg_color="transparent")
         scroll.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
 
-        ctk.CTkLabel(scroll, text="✂️ Clip-Inspektor", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=4, pady=(4, 6))
+        ctk.CTkLabel(scroll, text="✂️ Clip-Inspektor & Schnittliste", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00e5ff").pack(anchor="w", padx=4, pady=(4, 4))
 
         self.lbl_clip_stat = ctk.CTkLabel(
             scroll,
@@ -568,8 +618,9 @@ class LuxanixDesktopApp(ctk.CTk):
             text_color="#cbd5e1",
             justify="left"
         )
-        self.lbl_clip_stat.pack(anchor="w", padx=6, pady=4)
+        self.lbl_clip_stat.pack(anchor="w", padx=6, pady=2)
 
+        # Quick Actions
         btn_split_inspector = ctk.CTkButton(
             scroll,
             text="✂️ Clip hier teilen (Strg+B)",
@@ -578,28 +629,55 @@ class LuxanixDesktopApp(ctk.CTk):
             hover_color="#334155",
             command=self._split_clip_at_playhead
         )
-        btn_split_inspector.pack(fill="x", padx=4, pady=3)
+        btn_split_inspector.pack(fill="x", padx=4, pady=2)
 
         btn_del_inspector = ctk.CTkButton(
             scroll,
-            text="🗑️ Segment löschen (Entf)",
-            font=ctk.CTkFont(size=11),
-            fg_color="#27181c",
-            hover_color="#451e24",
-            text_color="#f87171",
+            text="🗑️ Ausgewählten Clip löschen (Entf)",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#7f1d1d",
+            hover_color="#991b1b",
+            text_color="#fecaca",
             command=self._delete_selected_segment
         )
-        btn_del_inspector.pack(fill="x", padx=4, pady=3)
+        btn_del_inspector.pack(fill="x", padx=4, pady=2)
+
+        # Prev / Next segment buttons
+        nav_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        nav_row.pack(fill="x", padx=4, pady=2)
+        ctk.CTkButton(
+            nav_row,
+            text="◀ Vorheriger",
+            font=ctk.CTkFont(size=10),
+            fg_color="#1e242d",
+            hover_color="#2b3442",
+            height=24,
+            command=self._select_prev_segment
+        ).pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ctk.CTkButton(
+            nav_row,
+            text="Nächster ▶",
+            font=ctk.CTkFont(size=10),
+            fg_color="#1e242d",
+            hover_color="#2b3442",
+            height=24,
+            command=self._select_next_segment
+        ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         btn_reset_inspector = ctk.CTkButton(
             scroll,
-            text="↩️ Schnitte zurücksetzen",
+            text="↩️ Alle Schnitte zurücksetzen",
             font=ctk.CTkFont(size=10),
             fg_color="#1e242d",
             hover_color="#2b3442",
             command=self._reset_cuts
         )
-        btn_reset_inspector.pack(fill="x", padx=4, pady=3)
+        btn_reset_inspector.pack(fill="x", padx=4, pady=2)
+
+        # Interactive Clip List container
+        ctk.CTkLabel(scroll, text="🎬 Clips auf der Timeline (Klick zum Auswählen):", font=ctk.CTkFont(size=10, weight="bold"), text_color="#94a3b8").pack(anchor="w", padx=4, pady=(10, 2))
+        self.frame_clips_container = ctk.CTkFrame(scroll, fg_color="#10151c", corner_radius=6, border_width=1, border_color="#1c2430")
+        self.frame_clips_container.pack(fill="x", padx=2, pady=2)
 
         # Fully Autonomous Hardware Auto-Tuning Card
         ctk.CTkLabel(scroll, text="⚡ Automatische Hardware-Optimierung", font=ctk.CTkFont(size=11, weight="bold"), text_color="#76b900").pack(anchor="w", padx=4, pady=(12, 4))
@@ -650,9 +728,12 @@ class LuxanixDesktopApp(ctk.CTk):
         tools_left.pack(side="left", padx=8, pady=3)
 
         ctk.CTkButton(tools_left, text="✂️ Teilen (Strg+B)", width=95, height=24, font=ctk.CTkFont(size=10, weight="bold"), fg_color="#1a222c", hover_color="#283444", command=self._split_clip_at_playhead).pack(side="left", padx=2)
-        ctk.CTkButton(tools_left, text="🗑️ Löschen (Entf)", width=95, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#3e2025", command=self._delete_selected_segment).pack(side="left", padx=2)
-        ctk.CTkButton(tools_left, text="⏮ Start trimmen", width=85, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._trim_start_at_playhead).pack(side="left", padx=2)
-        ctk.CTkButton(tools_left, text="⏭ Ende trimmen", width=85, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._trim_end_at_playhead).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="🗑️ Löschen (Entf)", width=90, height=24, font=ctk.CTkFont(size=10, weight="bold"), fg_color="#7f1d1d", hover_color="#991b1b", text_color="#fecaca", command=self._delete_selected_segment).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="◀ Vorh.", width=55, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._select_prev_segment).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="Nächst. ▶", width=55, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._select_next_segment).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="↩️ Schnitte Reset", width=95, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._reset_cuts).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="⏮ Trim In (I)", width=75, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._trim_start_at_playhead).pack(side="left", padx=2)
+        ctk.CTkButton(tools_left, text="⏭ Trim Out (O)", width=80, height=24, font=ctk.CTkFont(size=10), fg_color="#1a222c", hover_color="#283444", command=self._trim_end_at_playhead).pack(side="left", padx=2)
 
         self.lbl_timeline_summary = ctk.CTkLabel(
             toolbar,
@@ -758,13 +839,24 @@ class LuxanixDesktopApp(ctk.CTk):
             is_sel = (idx == self.selected_segment_idx)
 
             outline_col = "#00e5ff" if is_sel else "#008b94"
-            fill_col = "#1b2c3a" if is_sel else "#14212c"
+            fill_col = "#1b384d" if is_sel else "#14212c"
 
             # Clip box
             self.canvas_timeline.create_rectangle(
                 seg_x1, 32, seg_x2, 80,
-                fill=fill_col, outline=outline_col, width=2 if is_sel else 1
+                fill=fill_col, outline=outline_col, width=3 if is_sel else 1
             )
+
+            if is_sel:
+                # Top glowing accent line & tag
+                self.canvas_timeline.create_line(seg_x1, 32, seg_x2, 32, fill="#ffffff", width=2)
+                self.canvas_timeline.create_text(
+                    max(seg_x1 + 60, seg_x2 - 8), 44,
+                    text="✓ AUSGEWÄHLT",
+                    anchor="e",
+                    fill="#00e5ff",
+                    font=("Segoe UI", 8, "bold")
+                )
 
             # Segment Title & Duration
             seg_dur = seg["end"] - seg["start"]
@@ -774,7 +866,7 @@ class LuxanixDesktopApp(ctk.CTk):
                 text=title_text,
                 anchor="w",
                 fill="#ffffff" if is_sel else "#cbd5e1",
-                font=("Segoe UI", 9, "bold")
+                font=("Segoe UI", 9, "bold" if is_sel else "normal")
             )
 
             # Miniature preview blocks
@@ -784,8 +876,8 @@ class LuxanixDesktopApp(ctk.CTk):
                 bx = seg_x1 + bi * bw
                 self.canvas_timeline.create_rectangle(
                     bx + 2, 54, bx + bw - 2, 76,
-                    fill="#243445" if is_sel else "#1b2633",
-                    outline="#2f4255"
+                    fill="#27445c" if is_sel else "#1b2633",
+                    outline="#385b7c" if is_sel else "#2f4255"
                 )
 
         # 3. Track 2: AI Shader Track
@@ -841,6 +933,17 @@ class LuxanixDesktopApp(ctk.CTk):
             return
         target_sec = max(0.0, min(self.total_duration_sec, (event.x / w) * self.total_duration_sec))
         self.current_time_sec = target_sec
+
+        # Determine which clip segment was clicked
+        clicked_idx = -1
+        for i, seg in enumerate(self.timeline_segments):
+            if seg["start"] <= target_sec <= seg["end"]:
+                clicked_idx = i
+                break
+        if clicked_idx != -1 and clicked_idx != self.selected_segment_idx:
+            self.selected_segment_idx = clicked_idx
+
+        self._update_timeline_stats()
         self._seek_to_time(target_sec)
         self._draw_timeline()
 
@@ -848,7 +951,7 @@ class LuxanixDesktopApp(ctk.CTk):
         self._on_timeline_click(event)
 
     # =========================================================================
-    # NLE CUTTING & EDITING ACTIONS (SPLIT, DELETE, TRIM)
+    # NLE CUTTING & EDITING ACTIONS (SPLIT, DELETE, SELECT, TRIM, RESET)
     # =========================================================================
     def _split_clip_at_playhead(self):
         """Splits the clip segment under the playhead into two distinct clips (Ctrl+B)."""
@@ -857,37 +960,65 @@ class LuxanixDesktopApp(ctk.CTk):
 
         t = self.current_time_sec
         for i, seg in enumerate(self.timeline_segments):
-            if seg["start"] + 0.3 < t < seg["end"] - 0.3:
+            if seg["start"] + 0.2 < t < seg["end"] - 0.2:
                 # Split this segment!
                 seg1 = {"start": seg["start"], "end": t, "title": f"Clip {i+1}A"}
                 seg2 = {"start": t, "end": seg["end"], "title": f"Clip {i+1}B"}
                 self.timeline_segments[i] = seg1
                 self.timeline_segments.insert(i + 1, seg2)
                 self.selected_segment_idx = i + 1
-                self.lbl_status.configure(text=f"✂️ Clip bei {t:.1f}s geteilt! Neue Segmente: {len(self.timeline_segments)}")
+                self.lbl_status.configure(text=f"✂️ Clip bei {t:.1f}s geteilt! Gesamt: {len(self.timeline_segments)} Clips")
                 self._update_timeline_stats()
                 self._draw_timeline()
                 return
+        self.lbl_status.configure(text="Playhead befindet sich an den Rändern eines Clips (kein Schnitt nötig).")
 
     def _delete_selected_segment(self):
         """Deletes the currently selected segment from the timeline (Del)."""
+        self._delete_segment_by_index(self.selected_segment_idx)
+
+    def _delete_segment_by_index(self, idx):
+        """Deletes a specific segment by index with safety check."""
         if len(self.timeline_segments) <= 1:
-            messagebox.showinfo("Info", "Es muss mindestens ein Clip auf der Timeline verbleiben.")
+            messagebox.showinfo("Info", "Es muss mindestens ein Clip auf der Timeline verbleiben.\nNutze 'Schnitte zurücksetzen', wenn du das gesamte Video wiederherstellen möchtest.")
             return
 
-        idx = self.selected_segment_idx
         if 0 <= idx < len(self.timeline_segments):
-            del self.timeline_segments[idx]
+            deleted = self.timeline_segments.pop(idx)
             self.selected_segment_idx = max(0, min(len(self.timeline_segments) - 1, idx))
-            self.lbl_status.configure(text="🗑️ Segment aus Timeline gelöscht!")
+            # Move playhead to start of newly selected clip
+            new_seg = self.timeline_segments[self.selected_segment_idx]
+            self.current_time_sec = new_seg["start"]
+            self._seek_to_time(self.current_time_sec)
+            self.lbl_status.configure(text=f"🗑️ Clip {idx+1} ('{deleted.get('title', 'Clip')}') gelöscht!")
             self._update_timeline_stats()
             self._draw_timeline()
+
+    def _select_segment_by_index(self, idx):
+        if 0 <= idx < len(self.timeline_segments):
+            self.selected_segment_idx = idx
+            seg = self.timeline_segments[idx]
+            self.current_time_sec = seg["start"]
+            self._seek_to_time(self.current_time_sec)
+            self.lbl_status.configure(text=f"Ausgewählt: Clip {idx+1} ({seg.get('title', '')}) von {seg['start']:.1f}s bis {seg['end']:.1f}s")
+            self._update_timeline_stats()
+            self._draw_timeline()
+
+    def _select_prev_segment(self):
+        if self.timeline_segments:
+            new_idx = max(0, self.selected_segment_idx - 1)
+            self._select_segment_by_index(new_idx)
+
+    def _select_next_segment(self):
+        if self.timeline_segments:
+            new_idx = min(len(self.timeline_segments) - 1, self.selected_segment_idx + 1)
+            self._select_segment_by_index(new_idx)
 
     def _trim_start_at_playhead(self):
         idx = self.selected_segment_idx
         if 0 <= idx < len(self.timeline_segments):
             seg = self.timeline_segments[idx]
-            if self.current_time_sec < seg["end"] - 0.3:
+            if self.current_time_sec < seg["end"] - 0.2:
                 seg["start"] = self.current_time_sec
                 self._update_timeline_stats()
                 self._draw_timeline()
@@ -896,7 +1027,7 @@ class LuxanixDesktopApp(ctk.CTk):
         idx = self.selected_segment_idx
         if 0 <= idx < len(self.timeline_segments):
             seg = self.timeline_segments[idx]
-            if self.current_time_sec > seg["start"] + 0.3:
+            if self.current_time_sec > seg["start"] + 0.2:
                 seg["end"] = self.current_time_sec
                 self._update_timeline_stats()
                 self._draw_timeline()
@@ -904,19 +1035,102 @@ class LuxanixDesktopApp(ctk.CTk):
     def _reset_cuts(self):
         self.timeline_segments = [{"start": 0.0, "end": self.total_duration_sec, "title": "Gesamter Clip"}]
         self.selected_segment_idx = 0
+        self.current_time_sec = 0.0
+        self._seek_to_time(0.0)
+        self.lbl_status.configure(text="↩️ Alle Schnitte zurückgesetzt. Gesamtes Video wiederhergestellt.")
         self._update_timeline_stats()
         self._draw_timeline()
+
+    def _reset_ai_settings(self):
+        self.slider_intensity.set(1.0)
+        self.realism_intensity = 1.0
+        self.lbl_status.configure(text="↩️ KI-Photorealismus auf Standardwerte zurückgesetzt.")
+        if not self.is_playing:
+            self._render_single_frame_at(self.current_time_sec)
+
+    def _reset_color_settings(self):
+        self.slider_sat.set(1.0)
+        self.slider_temp.set(0.0)
+        self.slider_grain.set(0.05)
+        self.lbl_status.configure(text="↩️ Farbkorrektur auf Standardwerte zurückgesetzt.")
+        if not self.is_playing:
+            self._render_single_frame_at(self.current_time_sec)
+
+    def _reset_audio_settings(self):
+        self.slider_vol.set(1.0)
+        self.sw_mute.deselect()
+        self.lbl_status.configure(text="↩️ Audio-Einstellungen auf Standardwerte zurückgesetzt.")
+
+    def _reset_all(self):
+        self._reset_cuts()
+        self._reset_ai_settings()
+        self._reset_color_settings()
+        self._reset_audio_settings()
+        self.opt_speed.set("1.0x")
+        self.playback_speed = 1.0
+        self.seg_view_mode.set("⚡ Remaster")
+        self.split_view_mode = "Remaster"
+        self.opt_aspect.set("16:9 Breitbild")
+        self.aspect_ratio_mode = "16:9 Breitbild"
+        self.lbl_status.configure(text="↩️ Alles erfolgreich auf Standardwerte zurückgesetzt!")
+        messagebox.showinfo("Reset", "Alle Schnitte, KI-, Farb- und Audio-Einstellungen wurden auf Standard zurückgesetzt.")
 
     def _update_timeline_stats(self):
         n = len(self.timeline_segments)
         total_cut_len = sum(seg["end"] - seg["start"] for seg in self.timeline_segments)
-        self.lbl_timeline_summary.configure(text=f"Timeline: {n} Clips | Gesamtdauer des Schnitts: {total_cut_len:.1f}s")
+        self.lbl_timeline_summary.configure(text=f"Timeline: {n} Clips | Gesamtdauer: {total_cut_len:.1f}s")
 
         if 0 <= self.selected_segment_idx < n:
             s = self.timeline_segments[self.selected_segment_idx]
+            dur = s["end"] - s["start"]
             self.lbl_clip_stat.configure(
-                text=f"Ausgewähltes Segment: {self.selected_segment_idx + 1}/{n}\nStart: {s['start']:.1f}s | Ende: {s['end']:.1f}s\nDauer: {s['end'] - s['start']:.1f}s"
+                text=f"Ausgewähltes Segment: {self.selected_segment_idx + 1}/{n}\nTitel: {s.get('title', 'Clip')}\nStart: {s['start']:.1f}s | Ende: {s['end']:.1f}s\nDauer: {dur:.1f}s"
             )
+
+        # Refresh interactive clip cards in inspector
+        if hasattr(self, "frame_clips_container") and self.frame_clips_container.winfo_exists():
+            for child in self.frame_clips_container.winfo_children():
+                child.destroy()
+
+            for i, seg in enumerate(self.timeline_segments):
+                is_active = (i == self.selected_segment_idx)
+                seg_dur = seg["end"] - seg["start"]
+                card = ctk.CTkFrame(
+                    self.frame_clips_container,
+                    fg_color="#162534" if is_active else "#12161d",
+                    border_width=1,
+                    border_color="#00c4cc" if is_active else "#1f2937",
+                    corner_radius=4
+                )
+                card.pack(fill="x", padx=4, pady=2)
+
+                # Clickable label to select
+                lbl_card = ctk.CTkLabel(
+                    card,
+                    text=f"{'✓ ' if is_active else ''}🎬 Clip {i+1}: {seg.get('title', '')}\n{seg['start']:.1f}s – {seg['end']:.1f}s ({seg_dur:.1f}s)",
+                    font=ctk.CTkFont(size=9, weight="bold" if is_active else "normal"),
+                    text_color="#ffffff" if is_active else "#94a3b8",
+                    justify="left",
+                    anchor="w"
+                )
+                lbl_card.pack(side="left", fill="x", expand=True, padx=6, pady=4)
+                lbl_card.bind("<Button-1>", lambda e, idx=i: self._select_segment_by_index(idx))
+                card.bind("<Button-1>", lambda e, idx=i: self._select_segment_by_index(idx))
+
+                # Quick delete button on card
+                if n > 1:
+                    btn_del = ctk.CTkButton(
+                        card,
+                        text="🗑️",
+                        width=24,
+                        height=22,
+                        font=ctk.CTkFont(size=10),
+                        fg_color="#3e1a1f",
+                        hover_color="#7f1d1d",
+                        text_color="#f87171",
+                        command=lambda idx=i: self._delete_segment_by_index(idx)
+                    )
+                    btn_del.pack(side="right", padx=4, pady=4)
 
     # =========================================================================
     # FULL-VIDEO CONTINUOUS PLAYBACK ENGINE
