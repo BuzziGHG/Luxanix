@@ -1,4 +1,4 @@
-﻿# ⚡ Luxanix Studio v1.0.0 — AI Raytracing & Photorealistic Video Remaster
+# ⚡ Luxanix Studio v1.0.0 — AI Raytracing & Photorealistic Video Remaster
 
 Verwandle normale Gameplay- und Simracing-Videoaufnahmen in photorealistische Meisterwerke mit echtem Screen-Space Raytracing (RTGI, SSR, RTAO), KI-Tiefenrekonstruktion, Video-Schnittfunktion, Detail-Clarity und kinoreifem Color-Grading.
 
@@ -33,8 +33,8 @@ Verwandle normale Gameplay- und Simracing-Videoaufnahmen in photorealistische Me
   - **Subtiles Filmkorn:** Verhindert digitales Color-Banding.
 - **⏱️ Live Render-Monitor & ETA:**
   - Fortschrittsbalken, Prozentanzeige, Frame-Zähler (`Frame X / Y`), Render-FPS und minutengenaue Restzeitanzeige (ETA).
-- **⚡ Hardware NVENC Export:**
-  - Export in H.264 oder HEVC / H.265 mit wählbarer Bitrate bei 100 % Erhalt aller Original-Audiospuren.
+- **⚡ Hardware NVENC Export & 8K Ultra-Upscaling:**
+  - Export von 1080p, 1440p, 4K bis hin zu **8K Ultra HD (7680x4320 / 4320p)** mit NVIDIA HEVC NVENC Hardware-Beschleunigung und 100 % Audio-Erhalt.
 
 ---
 

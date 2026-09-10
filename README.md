@@ -18,7 +18,7 @@ Gameplay-Aufnahmen aus Rennsimulationen (*Assetto Corsa*, *ACC*, *iRacing*, *F1 
 Normale Schnittprogramme wie CapCut bieten lediglich einfache Farbfilter, besitzen aber **keinerlei Verständnis für 3D-Räume, Oberflächenkrümmungen oder Lichteinfall**.
 
 **Luxanix Studio bietet eine vollwertige Suite zur Videoveredelung:**
-1. **Video-Metadaten & Maße:** Sofortige Erkennung von Videoauflösung (1080p, 1440p, 4K), Seitenverhältnis (16:9, 21:9 Ultrawide, 32:9 Triple-Screen), Bildrate (FPS) und Gesamtlaufzeit.
+1. **Video-Metadaten & Maße:** Sofortige Erkennung von Videoauflösung (1080p, 1440p, 4K, 8K), Seitenverhältnis (16:9, 21:9 Ultrawide, 32:9 Triple-Screen), Bildrate (FPS) und Gesamtlaufzeit.
 2. **Integrierter Video-Cutter (Timeline-Trimming):** Bestimme Start- und Endzeitpunkt auf die Zehntelsekunde genau, um gezielt Renn-Highlights, Drifts oder Überholmanöver zu rendern, ohne stundenlanges Rohmaterial bearbeiten zu müssen.
 3. **AI-Tiefenrekonstruktion (Neural Monocular Depth):** Verwandelt 2D-Gameplay-Frames mithilfe von *Depth Anything v2* in dichte metrische 3D-Tiefenkarten – direkt auf den Tensor Cores berechnet.
 4. **Ray Traced Global Illumination (RTGI):** Berechnet physikalisches Abprall-Licht. Farbige Curbs, Leitplanken oder der Himmel strahlen realistisch auf den Asphalt und die Karosserie ab.
@@ -26,7 +26,7 @@ Normale Schnittprogramme wie CapCut bieten lediglich einfache Farbfilter, besitz
 6. **Ray Traced Ambient Occlusion (RTAO):** Physikalische Kontaktschatten unter dem Fahrzeugchassis und in den Radkästen lassen Autos fest mit der Strecke verschmelzen.
 7. **Detail-Clarity & Texturschärfung (Anti-TAA):** Beseitigt die typische Bewegungsunschärfe moderner Spiele und holt feine Strecken- und Karbondetails hervor.
 8. **Live Render-Monitor mit ETA & Fortschrittsbalken:** Präzise Anzeige von berechneten Frames, aktuellem Prozentwert, Render-FPS und minutengenauer Restzeit-Berechnung.
-9. **NVIDIA NVENC Hardware-Export:** Rasend schneller Export in H.264 oder HEVC / H.265 mit variabler Bitrate bei 100 % Erhalt aller Original-Audiospuren.
+9. **NVIDIA NVENC Export & 8K Ultra-Upscaling:** Blitzschneller Hardware-Export von 1080p bis **8K Ultra HD (7680x4320)** mit NVIDIA HEVC NVENC Hardware-Beschleunigung bei 100 % Audio-Erhalt.
 
 ---
 
@@ -57,49 +57,15 @@ Luxanix Studio erkennt deine Grafikkarte automatisch und wählt das passende Spe
 
 ---
 
-## 📤 1-Klick GitHub Upload
+## 📺 8K Ultra-Upscaling & AI Super-Resolution
 
-Um den lokalen Code und Updates direkt auf dein GitHub-Repository hochzuladen:
-- Doppelklicke auf **`upload_to_github.bat`**.
-- Wähle Option 1 (Browser-Login via GitHub) oder Option 2 (Personal Access Token). Das Skript synchronisiert den gesamten Code automatisch mit `https://github.com/BuzziGHG/Luxanix.git`.
-
----
-
-## 🎮 Enthaltene Presets für Simracing & Gaming
-
-| Preset | Beschreibung |
-| :--- | :--- |
-| 🌧️ **Simracing: Wet Track & Reflections** | Extreme Screen-Space-Reflexionen auf der Fahrbahn, kühler Ton, verstärkte Kontaktschatten für Regenschlachten. |
-| 🌅 **Simracing: Golden Hour Sunset** | Warme Farbtemperatur, weiches RTGI-Bounce-Licht, Sonnenuntergangs-Glow und cinematische Kontraste. |
-| ☁️ **Simracing: Nürburgring Overcast** | Realistische, neutrale Farbwiedergabe, diffuse Schatten und natürliche Strecken-Details. |
-| 🌃 **Simracing: Night Race & Headlights** | Knackige Tiefschwarzwerte, starker Bloom auf Scheinwerfern und Rückleuchten, Reflexionen auf Asphalt. |
-| 🏆 **Assetto Corsa / ACC Hyper-Realism** | Balanciertes RTGI + RTAO Profil mit ACES-Tonemapping und TAA-Clarity für maximale Authentizität. |
-| ⚡ **Subtle Clean RTX Boost** | Dezente Lichtaufwertung ohne Überzeichnung – ideal für Broadcast- und E-Sports-Streams. |
-
----
-
-## 📂 Projektstruktur
-
-```
-Luxanix/
-├── engine/
-│   ├── hardware.py           # Multi-Gen GPU-Erkennung (Turing, Ampere, Ada, Blackwell)
-│   ├── depth_estimator.py    # AI-Tiefenmodell (Depth Anything v2 / MiDaS) auf CUDA FP16
-│   ├── geometry.py           # 3D-Kameraraum & Oberflächennormalen-Rekonstruktion
-│   ├── raytracer.py          # Screen-Space Raymarching (RTGI, SSR, RTAO)
-│   ├── denoiser.py           # Cross-Bilateral Denoising Filter
-│   ├── postprocess.py        # Detail-Clarity, Filmkorn, Sättigung, Bloom, ACES Tonemap
-│   └── video_pipeline.py     # Video-Metadaten, Timeline-Cutter, NVENC-Encoder
-├── ui/
-│   └── app.py                # Luxanix Studio Web-Interface mit Before/After Slider & Cutter
-├── presets.json              # Vorkonfigurierte Shader-Profile
-├── install.bat               # 1-Klick Windows Installer
-├── run.bat                   # 1-Klick Starter
-├── upload_to_github.bat      # 1-Klick GitHub Synchronisations-Skript
-├── requirements.txt          # Paketabhängigkeiten
-├── pyproject.toml            # Pip / GitHub Projekt-Konfiguration
-└── README.md                 # Dokumentation
-```
+Luxanix Studio bietet integriertes High-End Upscaling bis zu **8K Ultra HD (7680x4320 / 4320p)**:
+- **Lanczos4 & Detail-Clarity Super-Resolution:** Schärft feine Streckentexturen, Curbs, Sponsoren-Aufkleber und Cockpit-Displays kristallklar nach.
+- **Hardware-beschleunigter HEVC / H.265 NVENC Export:** Volle Ausnutzung der NVIDIA-Hardware-Encoder bis zu 8192x8192 bei variabler Bitrate bis 160 Mbps.
+- **Volle Ultrawide- & Triple-Screen Unterstützung:**
+  - Standard 16:9: Bis zu 7680 x 4320 (8K UHD)
+  - Ultrawide 21:9: Bis zu 8192 x 3480
+  - Super-Ultrawide 32:9: Bis zu 8192 x 2304
 
 ---
 

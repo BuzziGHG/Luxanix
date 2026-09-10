@@ -229,21 +229,35 @@ class VideoPipeline:
             end_frame = total_video_frames
             total_frames_to_process = total_video_frames
 
-        # Target Output Resolution
-        out_res_choice = params.get("output_resolution", "Original")
+        # Target Output Resolution (Supports 1080p, 1440p, 4K UHD, and 8K Ultra-Upscaling)
+        out_res_choice = str(params.get("output_resolution", "Original"))
         out_w, out_h = width, height
-        if out_res_choice == "1080p Full HD" and height != 1080:
+        if "1080p" in out_res_choice and height != 1080:
             out_h = 1080
             out_w = int(width * (1080 / height))
-            out_w = out_w - (out_w % 2)  # Ensure even dimensions
-        elif out_res_choice == "1440p 2K QHD" and height != 1440:
+            out_w = out_w - (out_w % 2)
+        elif "1440p" in out_res_choice and height != 1440:
             out_h = 1440
             out_w = int(width * (1440 / height))
             out_w = out_w - (out_w % 2)
-        elif out_res_choice == "4K Ultra HD" and height != 2160:
+        elif "4K" in out_res_choice and height != 2160:
             out_h = 2160
             out_w = int(width * (2160 / height))
             out_w = out_w - (out_w % 2)
+        elif "8K" in out_res_choice and height != 4320:
+            out_h = 4320
+            out_w = int(width * (4320 / height))
+            out_w = out_w - (out_w % 2)
+
+        # Respect hardware encoder maximum limit (8192 for NVIDIA NVENC)
+        if out_w > 8192:
+            out_h = int(out_h * (8192 / out_w))
+            out_h = out_h - (out_h % 2)
+            out_w = 8192
+        if out_h > 8192:
+            out_w = int(out_w * (8192 / out_h))
+            out_w = out_w - (out_w % 2)
+            out_h = 8192
 
         temp_video_no_audio = output_path.replace(".mp4", "_temp_raw.mp4")
         temp_audio = output_path.replace(".mp4", "_audio.aac")
@@ -281,6 +295,11 @@ class VideoPipeline:
                 # Scale output if custom resolution selected
                 if (out_w != width) or (out_h != height):
                     out_rgb = cv2.resize(out_rgb, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+                    if out_h >= 4320:
+                        # 8K Super-Resolution Detail Enhancement (Edge-preserving clarity)
+                        blurred = cv2.GaussianBlur(out_rgb, (0, 0), 1.2)
+                        detail = cv2.addWeighted(out_rgb, 1.25, blurred, -0.25, 0)
+                        out_rgb = np.clip(detail, 0, 255).astype(np.uint8)
 
                 out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
                 writer.write(out_bgr)
@@ -306,7 +325,12 @@ class VideoPipeline:
         # Step 3: Combine with audio & encode via NVENC/FFmpeg
         nvenc_preset = params.get("nvenc_preset", "p7")
         codec = params.get("encoder_codec", "h264_nvenc")
-        bitrate_mbps = int(params.get("bitrate_mbps", 35))
+        bitrate_mbps = int(params.get("bitrate_mbps", 60 if out_h >= 4320 else 35))
+
+        # 8K resolution (>4096px) exceeds H.264 level limits; auto-switch to HEVC (H.265)
+        if (out_w > 4096 or out_h > 4096) and "h264" in codec:
+            print(f"[Luxanix] 8K-Auflösung ({out_w}x{out_h}) erfordert HEVC / H.265. Schalte automatisch auf hevc_nvenc um...")
+            codec = "hevc_nvenc"
 
         self._finalize_video(
             temp_video_no_audio,

@@ -25,7 +25,7 @@ jobs:
       - name: Compile Native Luxanix.exe
         shell: cmd
         run: |
-          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+ /platform:x64 /out:Luxanix.exe /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll "%CD%\src-launcher\Program.cs"
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+ /platform:x64 /out:Luxanix.exe /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll,System.IO.Compression.FileSystem.dll,System.IO.Compression.dll "%CD%\src-launcher\Program.cs"
 
       - name: Package Release ZIP
         run: |

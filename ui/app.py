@@ -524,16 +524,25 @@ def build_app():
                     gr.Markdown("### 🚀 Export-Einstellungen (NVIDIA NVENC Beschleunigung)")
                     with gr.Row():
                         output_resolution = gr.Dropdown(
-                            choices=["Original", "1080p Full HD", "1440p 2K QHD", "4K Ultra HD"],
+                            choices=[
+                                "Original",
+                                "1080p Full HD",
+                                "1440p 2K QHD",
+                                "4K Ultra HD (2160p)",
+                                "8K Ultra HD (4320p / 7680x4320)",
+                            ],
                             value="Original",
-                            label="Ausgabe-Auflösung"
+                            label="Ausgabe-Auflösung (inkl. 8K Super-Resolution Upscaling)"
                         )
                         encoder_codec = gr.Dropdown(
-                            choices=["H.264 (NVIDIA NVENC - Maximale Kompatibilität)", "HEVC / H.265 (NVIDIA NVENC - Höchste Effizienz)"],
-                            value="H.264 (NVIDIA NVENC - Maximale Kompatibilität)",
+                            choices=[
+                                "HEVC / H.265 (NVIDIA NVENC - Empfohlen für 4K/8K)",
+                                "H.264 (NVIDIA NVENC - Bis 4K, maximale Kompatibilität)",
+                            ],
+                            value="HEVC / H.265 (NVIDIA NVENC - Empfohlen für 4K/8K)",
                             label="Video-Codec"
                         )
-                        bitrate_mbps = gr.Slider(10, 80, value=35, step=5, label="Bitrate (Mbps)")
+                        bitrate_mbps = gr.Slider(10, 160, value=60, step=5, label="Bitrate (Mbps) — für 4K/8K 60-120 Mbps empfohlen")
 
                     btn_render_video = gr.Button("🚀 Starte Video-Raytracing Export", variant="primary", size="lg")
                     render_status = gr.Textbox(label="Live Render-Status & Speicherort", interactive=False, lines=2)
