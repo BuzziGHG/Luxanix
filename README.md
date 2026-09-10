@@ -1,13 +1,14 @@
-# ⚡ LUXANIX STUDIO — AI Raytracing & Photorealistic Video Remaster
+# ⚡ LUXANIX STUDIO — v1.0.0
 
-[![Download Luxanix.exe](https://img.shields.io/badge/📥%20Download-Luxanix.exe%20(Windows%20Release)-76b900.svg?style=for-the-badge&logo=windows)](https://github.com/BuzziGHG/Luxanix/releases/latest)
-[![GitHub Repository](https://img.shields.io/badge/GitHub-BuzziGHG%2FLuxanix-181717.svg?logo=github)](https://github.com/BuzziGHG/Luxanix)
+[![Aktuelle Version](https://img.shields.io/badge/Version-v1.0.0%20(Latest)-76b900.svg?style=for-the-badge&logo=github)](https://github.com/BuzziGHG/Luxanix/releases/latest)
+[![Download Luxanix.exe](https://img.shields.io/badge/📥%20Download-Luxanix.exe%20(v1.0.0)-10b981.svg?style=for-the-badge&logo=windows)](https://github.com/BuzziGHG/Luxanix/releases/latest)
 [![NVIDIA RTX Acceleration](https://img.shields.io/badge/NVIDIA%20RTX-20%20%7C%2030%20%7C%2040%20%7C%2050%20Series-76b900.svg?logo=nvidia)](https://www.nvidia.com)
 [![PyTorch CUDA](https://img.shields.io/badge/PyTorch-CUDA%2012.4-EE4C2C.svg?logo=pytorch)](https://pytorch.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> 👉 **[Klicke hier für das neueste Release: `Luxanix.exe` (GitHub Releases)](https://github.com/BuzziGHG/Luxanix/releases/latest)**
-> 💾 **[Direkt-Download: `Luxanix.exe` (Sofort-Download)](https://github.com/BuzziGHG/Luxanix/raw/main/Luxanix.exe)**
+> **Verwandle normale Gaming- und Simracing-Videoaufnahmen in photorealistische Meisterwerke mit echtem Screen-Space Raytracing (RTGI, SSR, RTAO), KI-Tiefenrekonstruktion, Auto-Adaptivem AI-Preset, nativer Desktop-App und 8K Ultra HD Upscaling.**
+> 
+> 📥 **[Hier klicken: Neueste Version `Luxanix.exe (v1.0.0)` herunterladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
 
 ---
 
@@ -45,15 +46,10 @@ Luxanix Studio erkennt deine Grafikkarte automatisch und wählt das passende Spe
 
 ## 🚀 Schnellstart (Windows)
 
-1. **Repository klonen:**
-   ```bash
-   git clone https://github.com/BuzziGHG/Luxanix.git
-   cd Luxanix
-   ```
-2. **Installation starten:**
-   - Doppelklicke auf **`install.bat`** (richtet Python 3.11, PyTorch mit CUDA 12.4 und alle Bibliotheken vollautomatisch ein).
-3. **Studio starten:**
-   - Doppelklicke auf **`run.bat`** (öffnet das Studio automatisch im Standard-Browser unter `http://127.0.0.1:7860`).
+1. Lade dir die neueste **[`Luxanix.exe`](https://github.com/BuzziGHG/Luxanix/releases/latest)** herunter.
+2. Mache einen **Doppelklick auf `Luxanix.exe`**.
+3. Das Programm startet direkt als eigenständige, native Windows Desktop-Applikation (kein Browser nötig).
+4. Video auswählen, Auto-Preset aktivieren und die Remaster-Vorschau direkt im integrierten Player ansehen!
 
 ---
 

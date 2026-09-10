@@ -29,7 +29,7 @@ jobs:
 
       - name: Package Release ZIP
         run: |
-          Compress-Archive -Path Luxanix.exe, install.bat, run.bat, presets.json, requirements.txt, pyproject.toml, README.md, LICENSE, engine, ui -DestinationPath Luxanix-Windows-v1.0.0.zip -Force
+          Compress-Archive -Path Luxanix.exe, presets.json, requirements.txt, README.md, LICENSE, engine, ui -DestinationPath Luxanix-Windows-v1.0.0.zip -Force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
