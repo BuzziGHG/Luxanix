@@ -1,12 +1,14 @@
 # ⚡ LUXANIX STUDIO — AI Raytracing & Photorealistic Video Remaster
 
+[![Download Luxanix.exe](https://img.shields.io/badge/📥%20Download-Luxanix.exe%20(Windows%20Release)-76b900.svg?style=for-the-badge&logo=windows)](https://github.com/BuzziGHG/Luxanix/releases/latest)
 [![GitHub Repository](https://img.shields.io/badge/GitHub-BuzziGHG%2FLuxanix-181717.svg?logo=github)](https://github.com/BuzziGHG/Luxanix)
 [![NVIDIA RTX Acceleration](https://img.shields.io/badge/NVIDIA%20RTX-20%20%7C%2030%20%7C%2040%20%7C%2050%20Series-76b900.svg?logo=nvidia)](https://www.nvidia.com)
 [![PyTorch CUDA](https://img.shields.io/badge/PyTorch-CUDA%2012.4-EE4C2C.svg?logo=pytorch)](https://pytorch.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB.svg?logo=python)](https://python.org)
 
 > **Verwandle normale Gaming- und Simracing-Videoaufnahmen in photorealistische Meisterwerke mit echtem Screen-Space Raytracing (RTGI, SSR, RTAO), KI-Tiefenrekonstruktion, Video-Schnittfunktion, Detail-Clarity und kinoreifem Color-Grading.**
+> 
+> 👉 **[Klicke hier, um die neueste `Luxanix.exe` herunterzuladen](https://github.com/BuzziGHG/Luxanix/releases/latest)**
 
 ---
 

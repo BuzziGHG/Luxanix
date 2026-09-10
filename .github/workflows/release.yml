@@ -1,0 +1,59 @@
+name: Build and Publish Luxanix Release
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Compile Native Luxanix.exe
+        run: |
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+ /platform:x64 /out:Luxanix.exe /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll src-launcher/Program.cs
+
+      - name: Package Release ZIP
+        run: |
+          Compress-Archive -Path Luxanix.exe, install.bat, run.bat, presets.json, requirements.txt, pyproject.toml, README.md, LICENSE, engine, ui -DestinationPath Luxanix-Windows-v1.0.0.zip -Force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.0
+          name: "Luxanix Studio v1.0.0 — AI Raytracing & Video Remaster"
+          draft: false
+          prerelease: false
+          body: |
+            ## ⚡ Luxanix Studio v1.0.0 Release
+            
+            Photorealistisches Screen-Space Raytracing (RTGI, SSR, RTAO), KI-Tiefenrekonstruktion, Video-Schnittfunktion, Detail-Clarity und kinoreifes Color-Grading für Simracing- und Gaming-Videos.
+            
+            ### 📥 Download:
+            - **`Luxanix.exe`**: Direkt startbare Windows-Anwendung.
+            - **`Luxanix-Windows-v1.0.0.zip`**: Vollständiges Paket inklusive Quellcode und 1-Klick-Starter.
+            
+            ### 🏎️ Features:
+            - **Video-Maße & Metadaten:** Automatische Erkennung von Auflösung, Seitenverhältnis, FPS und Dauer.
+            - **Integrierter Video-Cutter:** Bestimme Start- und Endzeitpunkt auf die Zehntelsekunde genau.
+            - **Echtes Raytracing:** RTGI (indirektes Licht), SSR (Reflexionen) und RTAO (Kontaktschatten).
+            - **Photorealismus:** Detail-Clarity (Anti-TAA), Scheinwerfer-Bloom, Filmkorn und ACES Filmic Tonemapping.
+            - **Live Render-Monitor:** Fortschrittsbalken, berechnete Frames, Render-FPS und minutengenaue Restzeitanzeige (ETA).
+            - **Hardware NVENC Export:** Blitzschnelles Rendern mit NVIDIA-Hardware-Beschleunigung.
+          files: |
+            Luxanix.exe
+            Luxanix-Windows-v1.0.0.zip
